@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import dataclasses
+import http.cookiejar
 import json
 import logging
+import pathlib
 import platform
 import threading
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 
-import keyring
-import requests
-import requests.exceptions
 import shotgun_api3
 
-SERVICE_NAME = "atgm:flow"
+DEFAULT_SITE_URL = "https://elephant-goldfish.shotgrid.autodesk.com"
+
+_CONFIG_DIR = pathlib.Path.home() / ".config" / "javelin"
+_CONFIG_FILE = _CONFIG_DIR / "connection.json"
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +46,39 @@ _POLL_INTERVAL = 2
 _ASL_PATH = "/internal_api/app_session_request"
 
 
+# --- HTTP facade -----------------------------------------------------------
+# The ASL login flow needs a handful of small JSON POST/PUT calls that share
+# cookies across a single authentication attempt. This keeps that plumbing in
+# one place instead of spreading urllib details through the module.
+
+
+def _build_opener(http_proxy: str | None) -> urllib.request.OpenerDirector:
+    handlers = [urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())]
+    if http_proxy:
+        handlers.append(urllib.request.ProxyHandler({"http": http_proxy, "https": http_proxy}))
+    return urllib.request.build_opener(*handlers)
+
+
+def _request_json(
+    opener: urllib.request.OpenerDirector,
+    method: str,
+    url: str,
+    payload: dict,
+    timeout: float,
+) -> dict:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return json.loads(response.read())
+    except urllib.error.URLError as exc:
+        raise AuthenticationError(f"Network error contacting {url}: {exc}") from exc
+
+
 def authenticate(
     site_url: str,
     http_proxy: str | None = None,
@@ -54,25 +91,23 @@ def authenticate(
     if not site_url.startswith(("http://", "https://")):
         site_url = "https://" + site_url
 
-    session = requests.Session()
-    if http_proxy:
-        session.proxies = {"http": http_proxy, "https": http_proxy}
+    opener = _build_opener(http_proxy)
 
-    session_id, browser_url = _begin_request(session, site_url)
+    session_id, browser_url = _begin_request(opener, site_url)
     webbrowser.open(browser_url)
-    return _poll_for_credentials(session, site_url, session_id, timeout, cancel_event)
+    return _poll_for_credentials(opener, site_url, session_id, timeout, cancel_event)
 
 
-def _begin_request(session: requests.Session, site_url: str) -> tuple[str, str]:
+def _begin_request(opener: urllib.request.OpenerDirector, site_url: str) -> tuple[str, str]:
     try:
-        resp = session.post(
+        data = _request_json(
+            opener,
+            "POST",
             site_url + _ASL_PATH,
-            json={"appName": "toolkit", "machineId": platform.node()},
+            {"appName": "toolkit", "machineId": platform.node()},
             timeout=15,
         )
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.RequestException as exc:
+    except urllib.error.HTTPError as exc:
         raise AuthenticationError(f"Failed to create session request: {exc}") from exc
 
     session_id = data.get("sessionRequestId") or data.get("id")
@@ -84,7 +119,7 @@ def _begin_request(session: requests.Session, site_url: str) -> tuple[str, str]:
 
 
 def _poll_for_credentials(
-    session: requests.Session,
+    opener: urllib.request.OpenerDirector,
     site_url: str,
     session_id: str,
     timeout: int,
@@ -98,15 +133,11 @@ def _poll_for_credentials(
         if cancel_event.is_set():
             break
         try:
-            resp = session.put(poll_url, json={}, timeout=15)
-            if resp.status_code == 404:
-                raise AuthenticationTimeout("Login session expired before browser approval.")
-            resp.raise_for_status()
-            result = resp.json()
-        except AuthenticationTimeout:
-            raise
-        except requests.exceptions.RequestException as exc:
-            raise AuthenticationError(f"Network error while polling: {exc}") from exc
+            result = _request_json(opener, "PUT", poll_url, {}, timeout=15)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise AuthenticationTimeout("Login session expired before browser approval.") from exc
+            raise AuthenticationError(f"Error while polling: {exc}") from exc
 
         if result.get("approved"):
             login = result.get("userLogin") or result.get("login", "")
@@ -152,7 +183,7 @@ def get_cached_credentials(site_url: str) -> Credentials | None:
 
 
 def connect(site_url: str | None = None) -> shotgun_api3.Shotgun:
-    site_url = site_url or "https://elephant-goldfish.shotgrid.autodesk.com"
+    site_url = site_url or DEFAULT_SITE_URL
 
     creds = get_credentials(site_url)
 
@@ -162,30 +193,56 @@ def connect(site_url: str | None = None) -> shotgun_api3.Shotgun:
     )
 
 
+# --- Credential store facade ------------------------------------------------
+# Credentials live in a single JSON file, keyed by site_url, with SSH-style
+# permissions (0700 dir / 0600 file) since there's no OS keychain backing it.
+
+
+def _read_store() -> dict:
+    try:
+        with _CONFIG_FILE.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_store(store: dict) -> None:
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _CONFIG_DIR.chmod(0o700)
+    _CONFIG_FILE.write_text(json.dumps(store), encoding="utf-8")
+    _CONFIG_FILE.chmod(0o600)
+
+
 def store_credentials(creds: Credentials) -> None:
-    keyring.set_password(SERVICE_NAME, creds.site_url, json.dumps(dataclasses.asdict(creds)))
+    store = _read_store()
+    store[creds.site_url] = dataclasses.asdict(creds)
+    _write_store(store)
 
 
 def clear_credentials(site_url: str) -> None:
     """Remove any stored credentials for site_url, if present."""
-    try:
-        keyring.delete_password(SERVICE_NAME, site_url)
-    except keyring.errors.PasswordDeleteError:
-        pass
+    store = _read_store()
+    if store.pop(site_url, None) is not None:
+        _write_store(store)
 
 
 def _load_credentials(site_url: str) -> Credentials | None:
-    encoded = keyring.get_password(SERVICE_NAME, site_url)
+    store = _read_store()
+    encoded = store.get(site_url)
     if not encoded:
         logger.info("No cached credentials found for site_url %s", site_url)
         return None
     try:
         logger.info("Loading cached credentials for site_url %s", site_url)
-        return Credentials(**json.loads(encoded))
+        return Credentials(**encoded)
     except Exception:
         return None
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    clear_credentials(DEFAULT_SITE_URL)
     connection = connect()
     print(connection.find_one("Project", []))
