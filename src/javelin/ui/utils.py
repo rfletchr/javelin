@@ -35,4 +35,4 @@ def invokeInContext(context: QtCore.QObject, func: typing.Callable) -> None:
     invoker = _Invoker(context, func)
     invoker.moveToThread(context.thread())
     _pending.add(invoker)
-    QtCore.QMetaObject.invokeMethod(invoker, b"run", QtCore.Qt.QueuedConnection)
+    QtCore.QMetaObject.invokeMethod(invoker, "run", QtCore.Qt.QueuedConnection)
