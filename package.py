@@ -6,7 +6,7 @@ version = "0.1.0"
 build_requires = ["dunc-1"]
 build_command = "dunc"
 
-requires = ["QtPy", "shotgun_api3", "fast_blurhash"]
+requires = ["QtPy", "shotgun_api3", "fast_blurhash", "Fileseq"]
 
 
 def commands():
