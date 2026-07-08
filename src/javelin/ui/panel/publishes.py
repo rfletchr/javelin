@@ -10,14 +10,13 @@ from javelin.ui.panel.shared import (
     IconProviderModel,
     IconWidget,
     IndexType,
-    MimeDataHandler,
     ModelRoles,
     StampListView,
+    StampTreeView,
     StampWidget,
 )
 
 SelectionMode = QtWidgets.QAbstractItemView.SelectionMode
-DragDropMode = QtWidgets.QAbstractItemView.DragDropMode
 ItemDataRole = QtCore.Qt.ItemDataRole
 
 
@@ -146,41 +145,14 @@ def _groupPublishVersions(rows: list[dict]) -> list[list[dict]]:
     return list(grouped.values())
 
 
-class PublishesMimeDataHandler(MimeDataHandler):
-    """Provides text/uri-list drag data for the local publish file paths, since QStandardItemModel
-    only offers its own internal (application/x-qstandarditemmodeldatalist) drag format by default."""
-
-    def mimeTypes(self) -> list[str]:
-        return ["text/uri-list"]
-
-    def mimeData(self, indexes: typing.Sequence[IndexType]) -> QtCore.QMimeData:
-        seen_rows: set[int] = set()
-        urls: list[QtCore.QUrl] = []
-        for index in indexes:
-            if not index.isValid() or index.row() in seen_rows:
-                continue
-            seen_rows.add(index.row())
-
-            entity = index.sibling(index.row(), 0).data(ItemDataRole.UserRole)
-            path = entity.get("path") if entity else None
-            if path:
-                urls.append(QtCore.QUrl.fromLocalFile(path["local_path"]))
-
-        mime_data = QtCore.QMimeData()
-        mime_data.setUrls(urls)
-        return mime_data
-
-
 class PublishesView(QtWidgets.QWidget):
     publishActivated = QtCore.Signal(QtCore.QModelIndex)  # type: ignore
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.publishes_list = StampListView(PublishStamp(), empty_text="click a shot...")
+        self.publishes_list = StampTreeView(PublishStamp(), empty_text="click a shot...")
         self.publishes_list.setIconSize(QtCore.QSize(64, 64))
         self.publishes_list.setSelectionMode(SelectionMode.SingleSelection)
-        self.publishes_list.setDragDropMode(DragDropMode.DragOnly)
-        self.publishes_list.setDragEnabled(True)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -204,7 +176,7 @@ class PublishesController(BaseController):
 
         self.view = view or PublishesView()
 
-        self.publishes_model = GenerationalItemModel(self, mime_handler=PublishesMimeDataHandler())
+        self.publishes_model = GenerationalItemModel(self)
         self.publishes_icon_provider = IconProviderModel(self)
         self.publishes_icon_provider.setSourceModel(self.publishes_model)
         self.view.setModel(self.publishes_icon_provider)

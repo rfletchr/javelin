@@ -12,6 +12,7 @@ from javelin.ui.panel.shared import (
     ModelRoles,
     SharedData,
     StampListView,
+    StampTreeView,
     StampWidget,
 )
 
@@ -79,7 +80,7 @@ class CompactTaskStamp(StampWidget):
         self.setStyleSheet(
             """
             CompactTaskStamp {
-                background-color: rgba(24, 24, 24, 255);
+                background-color: rgba(34, 34, 34, 255);
             }
             CompactTaskStamp QLabel[stampRole="primary"] {
                 font-weight: 600;
@@ -116,7 +117,10 @@ class TasksView(QtWidgets.QWidget):
         self.filter_editor.setPlaceholderText("Filter tasks...")
 
         stamp = CompactTaskStamp() if compact else TaskStamp()
-        self.tasks_list = StampListView(stamp, list_mode=compact)
+        if compact:
+            self.tasks_list = StampTreeView(stamp)
+        else:
+            self.tasks_list = StampListView(stamp, list_mode=compact)
         self.tasks_list.setDragDropMode(DragDropMode.NoDragDrop)
 
         layout = QtWidgets.QVBoxLayout()

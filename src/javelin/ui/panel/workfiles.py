@@ -66,7 +66,7 @@ class WorkfileStamp(StampWidget):
         self.setStyleSheet(
             """
             WorkfileStamp {
-                background-color: rgba(24, 24, 24, 255);
+                background-color: rgba(34, 34, 34, 255);
             }
             WorkfileStamp QLabel[stampRole="primary"] {
                 font-weight: 600;
@@ -126,6 +126,7 @@ class WorkfilesView(QtWidgets.QWidget):
         self.workfiles_tree.setHeaderHidden(True)
         self.workfiles_tree.setUniformRowHeights(True)
         self.workfiles_tree.setExpandsOnDoubleClick(False)
+
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
