@@ -403,7 +403,7 @@ class SharedData(typing.NamedTuple):
     @classmethod
     def from_db(cls, db: Database):
         logger.info("Loading shared data from database.")
-        connection = db._get_connection()
+        connection = db.get_connection()
 
         statuses = typing.cast(list[dict], connection.find("Status", [], ["code", "name", "bg_color"]))
 
