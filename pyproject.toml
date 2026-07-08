@@ -1,0 +1,31 @@
+[project]
+name = "javelin"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fast-blurhash>=0.4.0",
+    "keyring>=25.7.0",
+    "qtpy>=2.4.3",
+    "requests>=2.34.2",
+    "shotgun-api3",
+]
+
+[project.scripts]
+javelin = "javelin.ui.launcher.main:main"
+
+[project.optional-dependencies]
+standalone = [
+    "pyside6>=6.11.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+shotgun-api3 = { git = "https://github.com/shotgunsoftware/python-api.git" }
+
+[tool.ruff]
+line-length = 120
