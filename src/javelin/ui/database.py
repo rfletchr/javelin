@@ -12,6 +12,7 @@ from shotgun_api3.shotgun import Shotgun  # type: ignore[reportPrivateImportUsag
 
 from javelin import auth
 from javelin.ui.promise import Promise
+from javelin.ui.utils import invokeInContext
 
 SITE_URL = "https://elephant-goldfish.shotgrid.autodesk.com"
 
@@ -92,7 +93,7 @@ class Database:
         self.__generation = 0
 
     def __call__(self, *args: typing.Any, **kwds: typing.Any) -> typing.Any:
-        return self.get_connection()
+        return self._get_connection()
 
     def __app(self):
         app = QtCore.QCoreApplication.instance()
@@ -108,6 +109,13 @@ class Database:
         return f"{site_url}/detail/{entity_type}/{entity_id}"
 
     def get_connection(self) -> Shotgun:
+        try:
+            return self._get_connection()
+        except _NeedsAuth:
+            self.__reauthenticate(self.__generation)
+            return self._get_connection()
+
+    def _get_connection(self) -> Shotgun:
         pooled: _PooledConnection | None = getattr(self.__local, "connection", None)
         if pooled is not None and pooled.generation == self.__generation:
             return pooled.client
@@ -152,7 +160,7 @@ class Database:
         def _runPopup():
             _AuthPopup(cancel_event, done_event).exec()
 
-        QtCore.QTimer.singleShot(0, self.__app(), _runPopup)
+        invokeInContext(self.__app(), _runPopup)
         try:
             return auth.authenticate(SITE_URL, cancel_event=cancel_event)
         finally:
@@ -162,24 +170,24 @@ class Database:
 
     def __invoke(self, method: str, args: tuple, kwargs: dict):
         try:
-            client = self.get_connection()
+            client = self._get_connection()
             result = getattr(client, method)(*args, **kwargs)
             return result
         except (shotgun_api3.AuthenticationFault, _NeedsAuth):  # type: ignore[attr-defined]
             pooled: _PooledConnection | None = getattr(self.__local, "connection", None)
             observed_generation = pooled.generation if pooled else self.__generation
             self.__reauthenticate(observed_generation)
-            client = self.get_connection()
+            client = self._get_connection()
             return getattr(client, method)(*args, **kwargs)
 
     def __call(self, context: QtCore.QObject, method: str, *args, **kwargs) -> Promise:
         promise = Promise(context, self.__invoke, method, args, kwargs)
-        QtCore.QTimer.singleShot(0, context, lambda: QtCore.QThreadPool.globalInstance().start(promise))
+        invokeInContext(context, lambda: QtCore.QThreadPool.globalInstance().start(promise))
         return promise
 
     # -- public API -------------------------------------------------------
     def user(self) -> dict:
-        self.get_connection()
+        self._get_connection()
         if not self.__credentials:
             raise RuntimeError("Not authenticated")
         return self.__credentials.user

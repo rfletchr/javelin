@@ -4,6 +4,8 @@ import typing
 import shiboken6
 from qtpy import QtCore
 
+from javelin.ui.utils import invokeInContext
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +38,7 @@ class Promise(QtCore.QRunnable):
 
     def _invokeMethod(self, func: typing.Callable, *args, **kwargs):
         if shiboken6.isValid(self.__context):
-            QtCore.QTimer.singleShot(0, self.__context, lambda: func(*args, **kwargs))
+            invokeInContext(self.__context, lambda: func(*args, **kwargs))
 
     def run(self, /) -> None:
         if not shiboken6.isValid(self.__context):

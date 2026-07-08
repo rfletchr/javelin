@@ -3,6 +3,7 @@ import typing
 from qtpy import QtCore
 
 from javelin.ui.promise import Promise
+from javelin.ui.utils import invokeInContext
 
 
 class BaseController(QtCore.QObject):
@@ -23,5 +24,5 @@ class BaseController(QtCore.QObject):
 
     def promise(self, func: typing.Callable, *args, **kwargs):
         promise = Promise(self, func, *args, **kwargs)
-        QtCore.QTimer.singleShot(0, lambda: self.__flow_pool.start(promise))
+        invokeInContext(self, lambda: self.__flow_pool.start(promise))
         return promise
