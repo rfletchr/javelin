@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-javelin = "javelin.ui.launcher.main:main"
+javelin = "javelin.ui.panel.main:main"
 
 [project.optional-dependencies]
 standalone = [

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import platform
-import tomllib
 import typing
 
 from javelin import templates as templateslib
@@ -10,31 +8,12 @@ from javelin import utils as utilslib
 
 
 class ProjectManager:
-    @classmethod
-    def from_environment(cls):
-        return cls.from_directory(os.environ["JAVELIN_FACILITY_DIRECTORY"])
-
-    @classmethod
-    def from_directory(cls, facility_dir: str):
-        config_file = os.path.join(facility_dir, "config", "pipeline.toml")
-        with open(config_file, "rb") as f:
-            config = tomllib.load(f)
-
-        projects_dir = typing.cast(str, config["projects_dir"][platform.system().lower()])
-
-        return cls(facility_dir, projects_dir)
-
-    def __init__(self, facility_dir: str, projects_dir: str):
-        self.__facillity_dir = facility_dir
+    def __init__(self, projects_dir: str):
         self.__projects_dir = projects_dir
 
     @property
     def projects_dir(self) -> str:
         return self.__projects_dir
-
-    @property
-    def facility_dir(self) -> str:
-        return self.__facillity_dir
 
     def project_name_from_path(self, path: str) -> str:
         """
@@ -54,16 +33,6 @@ class ProjectManager:
 
 
 class Project:
-    @classmethod
-    def from_environmet(cls):
-        pipeline = ProjectManager.from_environment()
-
-        project_name = os.environ.get("JAVELIN_PROJECT_NAME")
-        if not project_name:
-            raise ValueError("JAVELIN_PROJECT_NAME environment variable not set")
-
-        return pipeline.get_project(project_name)
-
     @classmethod
     def from_directory(cls, manager: ProjectManager, directory: str):
         init_path = manager.init_path(os.path.basename(directory))
