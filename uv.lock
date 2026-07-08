@@ -25,11 +25,21 @@ wheels = [
 ]
 
 [[package]]
+name = "fileseq"
+version = "3.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/9f/211f4c1a07706dfd8ac92c64b17f2531891613019508bc5a59300a40ea56/fileseq-3.3.0.tar.gz", hash = "sha256:e4b2d44c218863fb913fbe8abd6adce5f7c3b88be42f016270b2c9525094bda0", size = 2176275, upload-time = "2026-07-05T03:35:33.156Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/18/b429fd820c432a65ab3ae176cd32ddc29d0de532dfa762e5a71563ef848c/fileseq-3.3.0-py3-none-any.whl", hash = "sha256:433e84b410381405e7fc06c559847e0cb05dd5f267fbc41ab06b491ecfddbdac", size = 205858, upload-time = "2026-07-05T03:35:31.752Z" },
+]
+
+[[package]]
 name = "javelin"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fast-blurhash" },
+    { name = "fileseq" },
     { name = "qtpy" },
     { name = "shotgun-api3" },
 ]
@@ -42,6 +52,7 @@ standalone = [
 [package.metadata]
 requires-dist = [
     { name = "fast-blurhash", specifier = ">=0.4.0" },
+    { name = "fileseq", specifier = ">=3.3.0" },
     { name = "pyside6", marker = "extra == 'standalone'", specifier = ">=6.11.1" },
     { name = "qtpy", specifier = ">=2.4.3" },
     { name = "shotgun-api3", git = "https://github.com/shotgunsoftware/python-api.git" },

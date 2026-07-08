@@ -21,6 +21,14 @@ DragDropMode = QtWidgets.QAbstractItemView.DragDropMode
 ItemDataRole = QtCore.Qt.ItemDataRole
 
 
+class Publish(typing.NamedTuple):
+    name: str
+    path: str
+    published_file_type: str
+    version_number: int
+    entity: dict
+
+
 class PublishStamp(StampWidget):
     """Stacks a publish's fields as text rows instead of the image + top/bottom burnin layout."""
 
@@ -164,7 +172,7 @@ class PublishesMimeDataHandler(MimeDataHandler):
 
 
 class PublishesView(QtWidgets.QWidget):
-    publishClicked = QtCore.Signal(QtCore.QModelIndex)  # type: ignore
+    publishActivated = QtCore.Signal(QtCore.QModelIndex)  # type: ignore
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -178,13 +186,15 @@ class PublishesView(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.publishes_list)
 
-        self.publishes_list.clicked.connect(self.publishClicked)
+        self.publishes_list.activated.connect(self.publishActivated)
 
     def setModel(self, model):
         self.publishes_list.setModel(model)
 
 
 class PublishesController(BaseController):
+    publishActivated = QtCore.Signal(object)  # Publish  # type: ignore
+
     def __init__(
         self, project_manager: ProjectManager, database: Database, view: PublishesView | None = None, parent=None
     ):
@@ -198,6 +208,27 @@ class PublishesController(BaseController):
         self.publishes_icon_provider = IconProviderModel(self)
         self.publishes_icon_provider.setSourceModel(self.publishes_model)
         self.view.setModel(self.publishes_icon_provider)
+
+        self.view.publishActivated.connect(self.onPublishActivated)
+
+    def onPublishActivated(self, index: QtCore.QModelIndex):
+        if not index.isValid():
+            return
+
+        data = index.data(ItemDataRole.UserRole)
+        if data is None:
+            return
+
+        path = data["path"]
+        self.publishActivated.emit(
+            Publish(
+                name=data["name"],
+                path=path["local_path"],
+                published_file_type=data["published_file_type.PublishedFileType.code"],
+                version_number=data["version_number"],
+                entity=data,
+            )
+        )
 
     def setEntity(self, entity: dict):
         self.setBusy(True)

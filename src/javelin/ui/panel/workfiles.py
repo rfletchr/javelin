@@ -158,6 +158,7 @@ class WorkfilesView(QtWidgets.QWidget):
 
 class WorkfilesController(BaseController):
     workfileActivated = QtCore.Signal(object)  # Workfile  # type: ignore
+    workfileCreated = QtCore.Signal(object)  # Workfile  # type: ignore
 
     def __init__(
         self,
@@ -232,11 +233,12 @@ class WorkfilesController(BaseController):
 
         self.setBusy(True)
         try:
-            self._createWorkfile(self.__project, self.__context, definition, template_name)
+            workfile = self._createWorkfile(self.__project, self.__context, definition, template_name)
         finally:
             self.setBusy(False)
 
         self.refresh()
+        self.workfileCreated.emit(workfile)
 
     def _createWorkfile(
         self,
@@ -244,7 +246,7 @@ class WorkfilesController(BaseController):
         context: ContextClasses,
         definition: WorkfileDefinition,
         template_name: str,
-    ):
+    ) -> Workfile:
         context_fields = context.fields()
         name = definition.name_pattern.format(**context_fields)
 
@@ -257,3 +259,5 @@ class WorkfilesController(BaseController):
 
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         shutil.copy2(source_path, target_path)
+
+        return Workfile(name=name, version=version, path=target_path, context=context)

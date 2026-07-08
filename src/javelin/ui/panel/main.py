@@ -2,7 +2,7 @@ import logging
 
 from qtpy import QtCore, QtWidgets
 
-from javelin.project import ProjectManager, Workfile
+from javelin.project import ProjectManager
 from javelin.ui.controller import BaseController
 from javelin.ui.database import Database, get_database
 from javelin.ui.panel.projects import ProjectsController, ProjectsView
@@ -36,6 +36,8 @@ class LoaderView(QtWidgets.QWidget):
 
 
 class LoaderController(BaseController):
+    publishActivated = QtCore.Signal(object)  # Publish  # type: ignore
+
     def __init__(
         self,
         project_manager: ProjectManager,
@@ -54,6 +56,7 @@ class LoaderController(BaseController):
         self.shots_controller.shotClicked.connect(self.onEntityClicked)
         self.shots_controller.busyChanged.connect(self.setBusy)
         self.publishes_controller.busyChanged.connect(self.setBusy)
+        self.publishes_controller.publishActivated.connect(self.publishActivated)
         self.__project: dict = {}
         self.__entity: dict = {}
 
@@ -82,6 +85,9 @@ class MyTasksView(QtWidgets.QWidget):
 
 
 class MyTasksController(BaseController):
+    workfileActivated = QtCore.Signal(object)  # Workfile  # type: ignore
+    workfileCreated = QtCore.Signal(object)  # Workfile  # type: ignore
+
     def __init__(
         self,
         project_manager: ProjectManager,
@@ -102,14 +108,12 @@ class MyTasksController(BaseController):
 
         self.tasks_controller.busyChanged.connect(self.setBusy)
         self.workfiles_controller.busyChanged.connect(self.setBusy)
-        self.workfiles_controller.workfileActivated.connect(self.onWorkfileActivated)
+        self.workfiles_controller.workfileActivated.connect(self.workfileActivated)
+        self.workfiles_controller.workfileCreated.connect(self.workfileCreated)
 
     def setProject(self, project: dict):
         self.tasks_controller.setProject(project)
         self.workfiles_controller.clear()
-
-    def onWorkfileActivated(self, workfile: Workfile):
-        print(workfile.path)
 
 
 class TaskBrowserView(QtWidgets.QWidget):
@@ -130,6 +134,9 @@ class TaskBrowserView(QtWidgets.QWidget):
 
 
 class TaskBrowserController(BaseController):
+    workfileActivated = QtCore.Signal(object)  # Workfile  # type: ignore
+    workfileCreated = QtCore.Signal(object)  # Workfile  # type: ignore
+
     def __init__(
         self,
         project_manager: ProjectManager,
@@ -153,7 +160,8 @@ class TaskBrowserController(BaseController):
         self.shots_controller.busyChanged.connect(self.setBusy)
         self.tasks_controller.busyChanged.connect(self.setBusy)
         self.workfiles_controller.busyChanged.connect(self.setBusy)
-        self.workfiles_controller.workfileActivated.connect(self.onWorkfileActivated)
+        self.workfiles_controller.workfileActivated.connect(self.workfileActivated)
+        self.workfiles_controller.workfileCreated.connect(self.workfileCreated)
 
     def onShotClicked(self, shot: dict):
         self.tasks_controller.setEntity(shot)
@@ -162,9 +170,6 @@ class TaskBrowserController(BaseController):
     def setProject(self, project: dict):
         self.shots_controller.setProject(project)
         self.workfiles_controller.clear()
-
-    def onWorkfileActivated(self, workfile: Workfile):
-        print(workfile.path)
 
 
 class TasksCompositeView(QtWidgets.QWidget):
@@ -204,6 +209,9 @@ class TasksCompositeView(QtWidgets.QWidget):
 
 
 class TasksCompositeController(BaseController):
+    workfileActivated = QtCore.Signal(object)  # Workfile  # type: ignore
+    workfileCreated = QtCore.Signal(object)  # Workfile  # type: ignore
+
     def __init__(
         self,
         project_manager: ProjectManager,
@@ -224,6 +232,10 @@ class TasksCompositeController(BaseController):
 
         self.my_tasks_controller.busyChanged.connect(self.setBusy)
         self.task_browser_controller.busyChanged.connect(self.setBusy)
+        self.my_tasks_controller.workfileActivated.connect(self.workfileActivated)
+        self.my_tasks_controller.workfileCreated.connect(self.workfileCreated)
+        self.task_browser_controller.workfileActivated.connect(self.workfileActivated)
+        self.task_browser_controller.workfileCreated.connect(self.workfileCreated)
 
     def setProject(self, project: dict):
         self.my_tasks_controller.setProject(project)
@@ -266,6 +278,10 @@ class MainView(QtWidgets.QWidget):
 
 
 class MainController(BaseController):
+    workfileActivated = QtCore.Signal(object)  # Workfile  # type: ignore
+    workfileCreated = QtCore.Signal(object)  # Workfile  # type: ignore
+    publishActivated = QtCore.Signal(object)  # Publish  # type: ignore
+
     def __init__(
         self,
         project_manager: ProjectManager,
@@ -295,6 +311,10 @@ class MainController(BaseController):
         self.projects_controller.busyChanged.connect(self.setBusy)
         self.tasks_composite_controller.busyChanged.connect(self.setBusy)
         self.loader_controller.busyChanged.connect(self.setBusy)
+
+        self.tasks_composite_controller.workfileActivated.connect(self.workfileActivated)
+        self.tasks_composite_controller.workfileCreated.connect(self.workfileCreated)
+        self.loader_controller.publishActivated.connect(self.publishActivated)
 
     def populate(self):
         logger.info("Populating launcher...")
