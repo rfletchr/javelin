@@ -239,7 +239,7 @@ class WidgetDelegate(QtWidgets.QStyledItemDelegate):
         bg_color = self._palette.color(QtGui.QPalette.ColorRole.Dark)
         painter.fillRect(option.rect.adjusted(2, 2, 2, 2), bg_color)
 
-        rect = option.rect.adjusted(1, 1, -1, -1)
+        rect = option.rect.adjusted(3, 3, -3, -3)
 
         self._stamp.setFixedSize(rect.size())
         self._stamp.populate(index)

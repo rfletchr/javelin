@@ -130,7 +130,7 @@ class ShotsController(BaseController):
 
     def onShotClicked(self, index: QtCore.QModelIndex):
         while hasattr(index.model(), "mapToSource"):
-            index = index.model().mapToSource(index)
+            index = index.model().mapToSource(index)  # type: ignore
 
         item = self.model.itemFromIndex(index)
         self.shotClicked.emit(item.data(ItemDataRole.UserRole))

@@ -11,7 +11,6 @@ from javelin.ui.panel.shared import (
     IconWidget,
     IndexType,
     ModelRoles,
-    StampListView,
     StampTreeView,
     StampWidget,
 )
@@ -217,5 +216,6 @@ class PublishesController(BaseController):
     def onPublishesFetched(self, publishes: list[dict]):
         grouped = _groupPublishVersions(publishes)
         self.publishes_model.setRowCount(0)
+
         for versions in grouped:
             self.publishes_model.appendRow(PublishItem(versions))
