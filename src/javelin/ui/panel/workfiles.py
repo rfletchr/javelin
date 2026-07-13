@@ -9,16 +9,7 @@ from qtpy import QtCore, QtGui, QtWidgets
 
 from javelin.project import ContextClasses, Project, ProjectManager, Workfile, WorkfileDefinition
 from javelin.ui.controller import BaseController
-from javelin.ui.panel.shared import (
-    GenerationalItemModel,
-    IconProviderModel,
-    IconWidget,
-    IndexType,
-    ModelRoles,
-    StampTreeView,
-    StampWidget,
-    get_theme_icon,
-)
+from javelin.ui.panel.shared import GenerationalItemModel, IconProviderModel, ModelRoles, get_theme_icon
 
 ItemDataRole = QtCore.Qt.ItemDataRole
 
@@ -40,78 +31,23 @@ def _group_workfiles(
     return grouped
 
 
-class WorkfileStamp(StampWidget):
-    _SIZE_HINT = QtCore.QSize(240, 32)
+def _make_workfile_row(workfile: Workfile) -> list[QtGui.QStandardItem]:
+    name_item = QtGui.QStandardItem(workfile.name)
+    name_item.setEditable(False)
+    name_item.setData(workfile, ItemDataRole.UserRole)
+    name_item.setData(workfile.path, ModelRoles.PathRole)
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None):
-        super().__init__(parent)
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+    version_item = QtGui.QStandardItem(f"v{workfile.version:03d}")
+    version_item.setEditable(False)
 
-        self.icon_widget = IconWidget()
-        self.icon_widget.setObjectName("icon_widget")
-
-        self.name_label = QtWidgets.QLabel()
-        self.name_label.setProperty("stampRole", "primary")
-
-        self.version_label = QtWidgets.QLabel()
-        self.version_label.setProperty("stampRole", "secondary")
-
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(6, 2, 6, 2)
-        layout.setSpacing(6)
-        layout.addWidget(self.icon_widget, 0)
-        layout.addWidget(self.name_label, 1)
-        layout.addWidget(self.version_label, 0)
-
-        self.setStyleSheet(
-            """
-            WorkfileStamp {
-                background-color: rgba(34, 34, 34, 255);
-            }
-            WorkfileStamp QLabel[stampRole="primary"] {
-                font-weight: 600;
-                color: rgba(255, 255, 255, 0.9);
-            }
-            WorkfileStamp QLabel[stampRole="secondary"] {
-                font-size: 12px;
-                font-weight: 300;
-                color: rgba(255, 255, 255, 0.7);
-            }
-            """
-        )
-
-    def populate(self, index: IndexType):
-        name = index.data(ModelRoles.NameRole)
-        if name:
-            self.name_label.setText(name)
-
-        version = index.data(ModelRoles.VersionNumberRole)
-        if version is not None:
-            self.version_label.setText(f"v{version:03d}")
-
-        icon = index.data(ItemDataRole.DecorationRole)
-        if icon:
-            self.icon_widget.setIcon(icon)
-
-    def sizeHint(self, /) -> QtCore.QSize:
-        return self._SIZE_HINT
-
-
-class WorkfileItem(QtGui.QStandardItem):
-    def __init__(self, workfile: Workfile):
-        super().__init__()
-        self.setEditable(False)
-        self.setData(workfile, ItemDataRole.UserRole)
-        self.setData(workfile.name, ModelRoles.NameRole)
-        self.setData(workfile.version, ModelRoles.VersionNumberRole)
-        self.setData(workfile.path, ModelRoles.PathRole)
+    return [name_item, version_item]
 
 
 class WorkfilesView(QtWidgets.QWidget):
     workfileActivated = QtCore.Signal(QtCore.QModelIndex)  # type: ignore
     newFileTriggered = QtCore.Signal(object, str)  # WorkfileDefinition, template name  # type: ignore
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, icon_size: QtCore.QSize | None = None):
         super().__init__(parent=parent)
         self.new_file_button = QtWidgets.QToolButton()
         self.new_file_button.setText("New File")
@@ -122,11 +58,14 @@ class WorkfilesView(QtWidgets.QWidget):
         self.new_file_menu = QtWidgets.QMenu(self.new_file_button)
         self.new_file_button.setMenu(self.new_file_menu)
 
-        self.workfiles_tree = StampTreeView(WorkfileStamp(), empty_text="no context set...")
-        self.workfiles_tree.setHeaderHidden(True)
+        self.workfiles_tree = QtWidgets.QTreeView()
+        self.workfiles_tree.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.workfiles_tree.setUniformRowHeights(True)
         self.workfiles_tree.setExpandsOnDoubleClick(False)
-
+        self.workfiles_tree.setIconSize(icon_size or QtCore.QSize(32, 32))
+        self.workfiles_tree.setStyleSheet("QTreeView::item { padding: 4px 6px; }")
+        self.workfiles_tree.header().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        self.workfiles_tree.setAlternatingRowColors(True)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -196,35 +135,34 @@ class WorkfilesController(BaseController):
         self.refresh()
 
     def refresh(self):
-        if self.__project is None or self.__context is None:
-            self.model.setItems([])
-            return
+        rows: list[list[QtGui.QStandardItem]] = []
 
-        self.setBusy(True)
-        try:
-            all_workfiles: list[Workfile] = []
-            for definition in self.__context.definition.workfiles:
-                all_workfiles.extend(self.__project.list_workfiles(self.__context, definition))
+        if self.__project is not None and self.__context is not None:
+            self.setBusy(True)
+            try:
+                all_workfiles: list[Workfile] = []
+                for definition in self.__context.definition.workfiles:
+                    all_workfiles.extend(self.__project.list_workfiles(self.__context, definition))
 
-            groups = _group_workfiles(all_workfiles, key=lambda wf: (wf.name, os.path.splitext(wf.path)[1].lower()))
+                groups = _group_workfiles(all_workfiles, key=lambda wf: (wf.name, os.path.splitext(wf.path)[1].lower()))
 
-            rows = []
-            for versions in groups.values():
-                latest, *older = versions
-                root_item = WorkfileItem(latest)
-                for workfile in older:
-                    root_item.appendRow(WorkfileItem(workfile))
-                rows.append(root_item)
+                for versions in groups.values():
+                    latest, *older = versions
+                    row = _make_workfile_row(latest)
+                    for workfile in older:
+                        row[0].appendRow(_make_workfile_row(workfile))
+                    rows.append(row)
+            finally:
+                self.setBusy(False)
 
-            self.model.setItems(rows)
-        finally:
-            self.setBusy(False)
+        self.model.setItems(rows)
+        self.model.setHorizontalHeaderLabels(["Name", "Version"])
 
     def onWorkfileActivated(self, index: QtCore.QModelIndex):
         if not index.isValid():
             return
 
-        workfile = index.data(ItemDataRole.UserRole)
+        workfile = index.sibling(index.row(), 0).data(ItemDataRole.UserRole)
         if workfile is not None:
             self.workfileActivated.emit(workfile)
 

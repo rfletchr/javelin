@@ -37,10 +37,9 @@ class ModelRoles(enum.IntEnum):
     LinkedEntityNameRole = enum.auto()
     StatusRole = enum.auto()
 
-    PublishNameRole = enum.auto()
-    PublishedFileTypeNameRole = enum.auto()
     VersionNumberRole = enum.auto()
     PublishVersionsRole = enum.auto()
+    IsPublishGroupRole = enum.auto()
     PathRole = enum.auto()
 
     ProjectInstanceRole = enum.auto()
@@ -448,7 +447,7 @@ class IconProviderModel(QtCore.QIdentityProxyModel):
         if role == ItemDataRole.DecorationRole:
             path = source_model.data(source_index, ModelRoles.PathRole)
             if not path:
-                return None
+                return source_model.data(source_index, role)
 
             extension = QtCore.QFileInfo(path).suffix().lower()
             extension = self.__fmt_map.get(extension, extension)

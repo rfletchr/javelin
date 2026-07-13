@@ -26,6 +26,7 @@ class LoaderView(QtWidgets.QWidget):
         self.splitter.addWidget(self.publish_view)
 
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.splitter)
 
     def setShotsModel(self, model):

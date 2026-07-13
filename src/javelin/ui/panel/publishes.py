@@ -5,15 +5,7 @@ from qtpy import QtCore, QtGui, QtWidgets
 from javelin.project import ProjectManager
 from javelin.ui.controller import BaseController
 from javelin.ui.database import Database
-from javelin.ui.panel.shared import (
-    GenerationalItemModel,
-    IconProviderModel,
-    IconWidget,
-    IndexType,
-    ModelRoles,
-    StampTreeView,
-    StampWidget,
-)
+from javelin.ui.panel.shared import GenerationalItemModel, IconProviderModel, ModelRoles, get_theme_icon
 
 SelectionMode = QtWidgets.QAbstractItemView.SelectionMode
 ItemDataRole = QtCore.Qt.ItemDataRole
@@ -27,106 +19,49 @@ class Publish(typing.NamedTuple):
     entity: dict
 
 
-class PublishStamp(StampWidget):
-    """Stacks a publish's fields as text rows instead of the image + top/bottom burnin layout."""
-
-    _SIZE_HINT = QtCore.QSize(186, 72)
-
-    def __init__(self, parent: QtWidgets.QWidget | None = None):
-        super().__init__(parent)
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
-
-        self.name_label = self._make_row_label("primary")
-        self.type_label = self._make_row_label("secondary")
-        self.version_label = self._make_row_label("secondary")
-
-        text_layout = QtWidgets.QVBoxLayout()
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(0)
-        text_layout.addWidget(self.name_label)
-        text_layout.addWidget(self.type_label)
-        text_layout.addWidget(self.version_label)
-        text_layout.addStretch(1)
-
-        self.icon_widget = IconWidget()
-        self.icon_widget.setObjectName("icon_widget")
-
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(6)
-        layout.addLayout(text_layout, 1)
-        layout.addWidget(self.icon_widget, 0)
-
-        self.setStyleSheet(
-            """
-            PublishStamp {
-                background-color: rgba(24, 24, 24, 255);
-            }
-            PublishStamp QLabel[stampRole="primary"] {
-                font-weight: 600;
-                color: rgba(255, 255, 255, 0.9);
-            }
-            PublishStamp QLabel[stampRole="secondary"] {
-                font-size: 12px;
-                font-weight: 300;
-                color: rgba(255, 255, 255, 0.7);
-            }
-            """
-        )
-
-    def _make_row_label(self, role: typing.Literal["primary", "secondary"]) -> QtWidgets.QLabel:
-        label = QtWidgets.QLabel()
-        label.setProperty("stampRole", role)
-        return label
-
-    def populate(self, index: IndexType):
-        name = index.data(ModelRoles.PublishNameRole)
-        if name:
-            self.name_label.setText(name)
-
-        type_name = index.data(ModelRoles.PublishedFileTypeNameRole)
-        if type_name:
-            self.type_label.setText(type_name)
-
-        version = index.data(ModelRoles.VersionNumberRole)
-        if version is not None:
-            self.version_label.setText(f"v{version}")
-
-        icon = index.data(ItemDataRole.DecorationRole)
-        if icon:
-            self.icon_widget.setIcon(icon)
-
-    def sizeHint(self, /) -> QtCore.QSize:
-        return self._SIZE_HINT
+_PUBLISH_FIELDS = [
+    "name",
+    "published_file_type.PublishedFileType.code",
+    "version_number",
+    "entity",
+    "entity.Shot.id",
+    "entity.Asset.id",
+    "path",
+]
 
 
-class PublishItem(QtGui.QStandardItem):
-    @staticmethod
-    def fields() -> list[str]:
-        return [
-            "name",
-            "published_file_type.PublishedFileType.code",
-            "version_number",
-            "entity",
-            "entity.Shot.id",
-            "entity.Asset.id",
-            "path",
-        ]
+def _make_publish_group_row(name: str) -> list[QtGui.QStandardItem]:
+    name_item = QtGui.QStandardItem(name)
+    name_item.setEditable(False)
+    name_item.setData(True, ModelRoles.IsPublishGroupRole)
+    name_item.setIcon(get_theme_icon("folder", QtWidgets.QStyle.StandardPixmap.SP_DirIcon))
 
-    def __init__(self, versions: list[dict]):
-        super().__init__()
-        self.setEditable(False)
+    font = name_item.font()
+    font.setBold(True)
+    name_item.setFont(font)
 
-        latest = versions[0]
-        self.setData(latest, ItemDataRole.UserRole)
-        self.setData(latest["name"], ModelRoles.PublishNameRole)
-        self.setData(latest["published_file_type.PublishedFileType.code"], ModelRoles.PublishedFileTypeNameRole)
-        self.setData(latest["version_number"], ModelRoles.VersionNumberRole)
-        self.setData(versions, ModelRoles.PublishVersionsRole)
+    return [name_item, QtGui.QStandardItem(), QtGui.QStandardItem()]
 
-        path = latest.get("path")
-        if path:
-            self.setData(path["local_path"], ModelRoles.PathRole)
+
+def _make_publish_row(versions: list[dict]) -> list[QtGui.QStandardItem]:
+    latest = versions[0]
+
+    name_item = QtGui.QStandardItem(latest["name"])
+    name_item.setEditable(False)
+    name_item.setData(latest, ItemDataRole.UserRole)
+    name_item.setData(versions, ModelRoles.PublishVersionsRole)
+
+    path = latest.get("path")
+    if path:
+        name_item.setData(path["local_path"], ModelRoles.PathRole)
+
+    type_item = QtGui.QStandardItem(latest["published_file_type.PublishedFileType.code"])
+    type_item.setEditable(False)
+
+    version_item = QtGui.QStandardItem(f"v{latest['version_number']}")
+    version_item.setEditable(False)
+
+    return [name_item, type_item, version_item]
 
 
 def _groupPublishVersions(rows: list[dict]) -> list[list[dict]]:
@@ -144,14 +79,30 @@ def _groupPublishVersions(rows: list[dict]) -> list[list[dict]]:
     return list(grouped.values())
 
 
+def _groupPublishesByName(type_groups: list[list[dict]]) -> dict[tuple, list[list[dict]]]:
+    """Group per-type version groups (from `_groupPublishVersions`) by shot/asset + name, so
+    published file types sharing a name nest under one parent row."""
+    grouped: dict[tuple, list[list[dict]]] = {}
+    for versions in type_groups:
+        latest = versions[0]
+        name_key = (latest["entity.Shot.id"], latest["entity.Asset.id"], latest["name"])
+        grouped.setdefault(name_key, []).append(versions)
+    return grouped
+
+
 class PublishesView(QtWidgets.QWidget):
     publishActivated = QtCore.Signal(QtCore.QModelIndex)  # type: ignore
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, icon_size: QtCore.QSize | None = None):
         super().__init__(parent=parent)
-        self.publishes_list = StampTreeView(PublishStamp(), empty_text="click a shot...")
-        self.publishes_list.setIconSize(QtCore.QSize(64, 64))
+        self.publishes_list = QtWidgets.QTreeView()
+        self.publishes_list.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.publishes_list.setSelectionMode(SelectionMode.SingleSelection)
+        self.publishes_list.setUniformRowHeights(True)
+        self.publishes_list.setIconSize(icon_size or QtCore.QSize(32, 32))
+        self.publishes_list.header().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        self.publishes_list.setAlternatingRowColors(True)
+        self.publishes_list.setStyleSheet("QTreeView::item { padding: 4px 6px; }")
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -161,6 +112,9 @@ class PublishesView(QtWidgets.QWidget):
 
     def setModel(self, model):
         self.publishes_list.setModel(model)
+
+    def expandAll(self):
+        self.publishes_list.expandAll()
 
 
 class PublishesController(BaseController):
@@ -176,6 +130,7 @@ class PublishesController(BaseController):
         self.view = view or PublishesView()
 
         self.publishes_model = GenerationalItemModel(self)
+        self.publishes_model.setHorizontalHeaderLabels(["Name", "Type", "Version"])
         self.publishes_icon_provider = IconProviderModel(self)
         self.publishes_icon_provider.setSourceModel(self.publishes_model)
         self.view.setModel(self.publishes_icon_provider)
@@ -186,7 +141,11 @@ class PublishesController(BaseController):
         if not index.isValid():
             return
 
-        data = index.data(ItemDataRole.UserRole)
+        name_index = index.sibling(index.row(), 0)
+        if name_index.data(ModelRoles.IsPublishGroupRole):
+            return
+
+        data = name_index.data(ItemDataRole.UserRole)
         if data is None:
             return
 
@@ -210,12 +169,17 @@ class PublishesController(BaseController):
                 ["entity", "is", entity],
                 ["sg_status_list", "not_in", ["omt", "na"]],
             ],
-            fields=PublishItem.fields(),
+            fields=_PUBLISH_FIELDS,
         ).then(self.onPublishesFetched).and_finally(lambda: self.setBusy(False))
 
     def onPublishesFetched(self, publishes: list[dict]):
-        grouped = _groupPublishVersions(publishes)
+        by_name = _groupPublishesByName(_groupPublishVersions(publishes))
         self.publishes_model.setRowCount(0)
 
-        for versions in grouped:
-            self.publishes_model.appendRow(PublishItem(versions))
+        for type_groups in by_name.values():
+            group_row = _make_publish_group_row(type_groups[0][0]["name"])
+            for versions in type_groups:
+                group_row[0].appendRow(_make_publish_row(versions))
+            self.publishes_model.appendRow(group_row)
+
+        self.view.expandAll()
