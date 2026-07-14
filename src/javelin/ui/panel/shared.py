@@ -181,40 +181,22 @@ class BurninStamp(StampWidget):
 
 
 class StampListView(QtWidgets.QListView):
-    def __init__(
-        self,
-        stamp: StampWidget,
-        parent: QtWidgets.QWidget | None = None,
-        empty_text: str | None = None,
-        list_mode: bool = False,
-    ):
-        super().__init__(parent)
-        self.setItemDelegate(WidgetDelegate(stamp, self, stretch=list_mode))
-        self.setResizeMode(QtWidgets.QListView.ResizeMode.Adjust)
-        self.setUniformItemSizes(not list_mode)
-        if list_mode:
-            self.setViewMode(QtWidgets.QListView.ViewMode.ListMode)
-            self.setFlow(QtWidgets.QListView.Flow.TopToBottom)
-            self.setWrapping(False)
-            self.setSpacing(2)
-        else:
-            self.setViewMode(QtWidgets.QListView.ViewMode.IconMode)
-            self.setFlow(QtWidgets.QListView.Flow.LeftToRight)
-            self.setSpacing(10)
-        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.__empty_text = empty_text or "Nothing Found"
+    """Icon-mode grid of stamps. The stamp's sizeHint width is a guide: each row fits as many
+    cells as the guide allows, the cells stretch equally to fill the leftover width, and the
+    stamp renders at its hinted size centered in its cell."""
 
-    def paintEvent(self, e: QtGui.QPaintEvent, /) -> None:
-        super().paintEvent(e)
-        if not self.model() or not self.model().rowCount():
-            painter = QtGui.QPainter(self.viewport())
-            painter.drawText(self.viewport().rect(), QtCore.Qt.AlignmentFlag.AlignCenter, self.__empty_text)
-
-
-class StampTreeView(QtWidgets.QTreeView):
     def __init__(self, stamp: StampWidget, parent: QtWidgets.QWidget | None = None, empty_text: str | None = None):
         super().__init__(parent)
         self.setItemDelegate(WidgetDelegate(stamp, self))
+        self.setResizeMode(QtWidgets.QListView.ResizeMode.Adjust)
+        self.setViewMode(QtWidgets.QListView.ViewMode.IconMode)
+        self.setFlow(QtWidgets.QListView.Flow.LeftToRight)
+        self.setSpacing(10)
+        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        # Rows always fit the viewport by construction (see WidgetDelegate.sizeHint), so a
+        # horizontal scrollbar can only ever appear transiently mid-resize, before the
+        # delayed relayout runs — which reads as flicker. Never show it.
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.__empty_text = empty_text or "Nothing Found"
 
     def paintEvent(self, e: QtGui.QPaintEvent, /) -> None:
@@ -225,20 +207,30 @@ class StampTreeView(QtWidgets.QTreeView):
 
 
 class WidgetDelegate(QtWidgets.QStyledItemDelegate):
-    def __init__(self, stamp: StampWidget, parent: QtWidgets.QWidget | None = None, stretch: bool = False):
+    def __init__(self, stamp: StampWidget, parent: QtWidgets.QWidget | None = None):
         super().__init__(parent)
         self._stamp = stamp
-        self._stretch = stretch
         if parent is not None:
             self._stamp.setParent(parent)
         self._stamp.hide()
         self._palette = QtWidgets.QApplication.palette()
 
-    def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionViewItem, index: IndexType) -> None:
-        bg_color = self._palette.color(QtGui.QPalette.ColorRole.Dark)
-        painter.fillRect(option.rect.adjusted(2, 2, 2, 2), bg_color)
+    def cardRect(self, cell: QtCore.QRect) -> QtCore.QRect:
+        """The stamp keeps its hinted size regardless of how wide its cell stretched: the
+        card is centered and leftover cell width becomes empty space around it, so embedded
+        images never distort. Only shrinks when the cell is narrower than the hint."""
+        hint = self._stamp.sizeHint()
+        width = max(1, min(hint.width(), cell.width() - 6))
+        height = max(1, min(hint.height(), cell.height() - 6))
+        card = QtCore.QRect(0, 0, width, height)
+        card.moveCenter(cell.center())
+        return card
 
-        rect = option.rect.adjusted(3, 3, -3, -3)
+    def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionViewItem, index: IndexType) -> None:
+        rect = self.cardRect(option.rect)
+
+        bg_color = self._palette.color(QtGui.QPalette.ColorRole.Dark)
+        painter.fillRect(rect.translated(2, 2), bg_color)
 
         self._stamp.setFixedSize(rect.size())
         self._stamp.populate(index)
@@ -268,9 +260,32 @@ class WidgetDelegate(QtWidgets.QStyledItemDelegate):
             return size
 
         hint = self._stamp.sizeHint()
-        if self._stretch and self.parent() is not None:
-            return QtCore.QSize(self.parent().viewport().width(), hint.height())
-        return hint
+        view = self.parent()
+        if not isinstance(view, QtWidgets.QListView):
+            return hint
+
+        # The hint width is a guide, not a fixed size: fit as many columns as the guide
+        # allows, then split the leftover width between them so each row fills the
+        # viewport. Relies on ResizeMode.Adjust re-laying-out (and re-querying this
+        # hint) whenever the viewport resizes. QListView's icon-mode wrap condition is
+        # strict (`x + width + spacing < viewport`), hence the -1s: an exact fit wraps.
+        model = view.model()
+        if model is not None and model.rowCount() <= 1:
+            # Nothing to share a row with, so there's no leftover width to distribute:
+            # stretching a lone item would just blow it up to the full viewport width.
+            return hint
+
+        spacing = view.spacing()
+        available = view.viewport().width()
+        columns = max(1, (available - spacing - 1) // (hint.width() + spacing))
+
+        # Fewer items than columns would leave the row's leftover width undistributed,
+        # so the odd items sit off-center; let them share the full row instead.
+        if model is not None:
+            columns = max(1, min(columns, model.rowCount()))
+
+        width = max(1, (available - spacing * (columns + 1) - 1) // columns)
+        return QtCore.QSize(width, hint.height())
 
 
 class MimeDataHandler:

@@ -73,7 +73,7 @@ class TasksView(QtWidgets.QWidget):
             self.tasks_list.setStyleSheet("QTreeView::item { padding: 4px 6px; }")
             self.tasks_list.header().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         else:
-            self.tasks_list = StampListView(TaskStamp(), list_mode=False)
+            self.tasks_list = StampListView(TaskStamp())
         self.tasks_list.setDragDropMode(DragDropMode.NoDragDrop)
 
         layout = QtWidgets.QVBoxLayout()

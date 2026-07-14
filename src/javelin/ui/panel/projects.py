@@ -45,6 +45,9 @@ class ProjectsView(QtWidgets.QWidget):
     def setModel(self, model):
         self.projects_combo.setModel(model)
 
+    def selectRow(self, row: int):
+        self.projects_combo.setCurrentIndex(row)
+
 
 class ProjectsController(BaseController):
     projectChanged = QtCore.Signal(dict)  # type: ignore
@@ -83,6 +86,16 @@ class ProjectsController(BaseController):
             .then(self._onQueryCompleted)
             .and_finally(lambda: self.setBusy(False))
         )
+
+    def selectProjectByName(self, tank_name: str) -> bool:
+        for row in range(self.model.rowCount()):
+            entity = self.model.item(row).data(ItemDataRole.UserRole)
+            if entity["tank_name"] == tank_name:
+                self.view.selectRow(row)
+                return True
+
+        logger.warning("No project found matching tank_name: %s", tank_name)
+        return False
 
     def _onQueryCompleted(self, rows: list[dict]):
         self.model.clear()

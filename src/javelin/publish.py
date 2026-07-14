@@ -142,7 +142,7 @@ def _sg_batch(
     return result  # type: ignore[return-value]
 
 
-def _task_filters_for_context(context: ContextClasses) -> list[list]:
+def task_filters_for_context(context: ContextClasses) -> list[list]:
     filters = [
         ["project.Project.tank_name", "is", context.project],
         ["content", "is", context.task],
@@ -175,7 +175,7 @@ def resolve_context_entities(connection_factory: ConnectionFactory, context: Con
     the same trio tank's Context.project/entity/task expose.
     Raises ValueError if no matching Task exists in ShotGrid.
     """
-    task = _sg_find_one(connection_factory, "Task", _task_filters_for_context(context), ["project", "entity"])
+    task = _sg_find_one(connection_factory, "Task", task_filters_for_context(context), ["project", "entity"])
     if task is None:
         raise ValueError(f"no ShotGrid Task found for context: {context}")
     return ContextEntities(

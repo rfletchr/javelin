@@ -1,7 +1,8 @@
 import typing
 
-from qtpy import QtCore
+from qtpy import QtCore, QtWidgets
 
+from javelin.project import ContextClasses
 from javelin.ui.promise import Promise
 from javelin.ui.utils import invokeInContext
 
@@ -26,3 +27,27 @@ class BaseController(QtCore.QObject):
         promise = Promise(self, func, *args, **kwargs)
         invokeInContext(self, lambda: self.__flow_pool.start(promise))
         return promise
+
+
+class PanelController(BaseController):
+    """A controller that can be handed to MainController.addTabController() to be
+    hosted as a tab. Subclasses must implement getView()/getName(); setup()/teardown()
+    are optional hooks for lazy initialization and cleanup around a tab's lifetime."""
+
+    def getView(self) -> QtWidgets.QWidget:
+        raise NotImplementedError
+
+    def getName(self) -> str:
+        raise NotImplementedError
+
+    def setup(self):
+        pass
+
+    def teardown(self):
+        pass
+
+    def setProject(self, project: dict):
+        pass
+
+    def setContext(self, context: ContextClasses | None):
+        pass

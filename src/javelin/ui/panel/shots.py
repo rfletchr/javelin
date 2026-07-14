@@ -83,6 +83,10 @@ class ShotsView(QtWidgets.QWidget):
     def setModel(self, model):
         self.shot_list.setModel(model)
 
+    def selectIndex(self, index: QtCore.QModelIndex):
+        self.shot_list.setCurrentIndex(index)
+        self.shot_list.scrollTo(index)
+
 
 class ShotsController(BaseController):
     shotClicked = QtCore.Signal(dict)  # type: ignore
@@ -113,6 +117,7 @@ class ShotsController(BaseController):
         self.view.setModel(self.filter_model)
 
         self.__status_map = dict[str, str]()
+        self.__pending_shot_id: int | None = None
 
         self.view.shotClicked.connect(self.onShotClicked)
         self.view.shotFilterChanged.connect(self.filter_model.setFilterFixedString)
@@ -127,6 +132,7 @@ class ShotsController(BaseController):
 
     def onShotsFetched(self, entities: list[dict]):
         self.model.setItems([ShotItem(e, self.shared_data) for e in entities])
+        self._trySelectPending()
 
     def onShotClicked(self, index: QtCore.QModelIndex):
         while hasattr(index.model(), "mapToSource"):
@@ -134,3 +140,22 @@ class ShotsController(BaseController):
 
         item = self.model.itemFromIndex(index)
         self.shotClicked.emit(item.data(ItemDataRole.UserRole))
+
+    def selectShotId(self, shot_id: int):
+        """Select the shot with this id, once it appears in the (possibly still loading) list."""
+        self.__pending_shot_id = shot_id
+        self._trySelectPending()
+
+    def _trySelectPending(self):
+        if self.__pending_shot_id is None:
+            return
+
+        for row in range(self.model.rowCount()):
+            item = self.model.item(row)
+            entity = item.data(ItemDataRole.UserRole)
+            if entity["id"] == self.__pending_shot_id:
+                self.__pending_shot_id = None
+                index = self.filter_model.mapFromSource(self.images_model.mapFromSource(item.index()))
+                self.view.selectIndex(index)
+                self.shotClicked.emit(entity)
+                return

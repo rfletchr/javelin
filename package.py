@@ -13,7 +13,7 @@ def commands():
     env.PYTHONPATH.append("{root}/src")
 
     if "nuke" in resolve:
-        env.NUKE_PATH.append("{root}/src/javelin/ui/nuke")
+        env.NUKE_PATH.append("{root}/src/javelin/nuke")
 
 
 def install():

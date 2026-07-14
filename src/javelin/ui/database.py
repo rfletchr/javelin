@@ -111,7 +111,7 @@ class Database:
     def get_connection(self) -> Shotgun:
         try:
             return self._get_connection()
-        except _NeedsAuth:
+        except (_NeedsAuth, shotgun_api3.AuthenticationFault):
             self.__reauthenticate(self.__generation)
             return self._get_connection()
 
@@ -135,6 +135,8 @@ class Database:
             client.config.session_token = credentials.session_token
         else:
             client = Shotgun(SITE_URL, session_token=credentials.session_token)
+
+        client.find_one("Project", [])
 
         self.__local.connection = _PooledConnection(client, generation)
         return client
