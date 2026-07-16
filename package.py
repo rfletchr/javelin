@@ -1,6 +1,6 @@
 name = "javelin"
 
-version = "0.2.0"
+version = "0.3.0"
 
 
 build_requires = ["dunc-1"]

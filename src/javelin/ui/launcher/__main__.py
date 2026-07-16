@@ -280,6 +280,11 @@ class LauncherView(QtWidgets.QWidget):
         event.ignore()
         self.hide()
 
+    def contextMenuEvent(self, event: QtGui.QContextMenuEvent):
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("Quit", QtWidgets.QApplication.instance().quit)
+        menu.exec(event.globalPos())
+
 
 def _download_pixmap(url: str) -> QtGui.QPixmap | None:
     try:
@@ -386,7 +391,7 @@ def _tray_icon() -> QtGui.QIcon:
 
 
 class TrayController(BaseController):
-    """Owns the QSystemTrayIcon: show/hide of the launcher window, and a
+    """Owns the QSystemTrayIcon: raising the launcher window, and a
     Projects -> Commands menu that launches DCC sessions without opening the window."""
 
     def __init__(self, launcher_controller: LauncherController, parent=None):
@@ -395,7 +400,7 @@ class TrayController(BaseController):
         self._project_cache: dict[str, Project] = {}
 
         self.menu = QtWidgets.QMenu()
-        self.toggle_action = self.menu.addAction("Hide Javelin", self.onToggleView)
+        self.menu.addAction("Show UI", self.showView)
         self.menu.addSeparator()
 
         self.projects_menu = self.menu.addMenu("Projects")
@@ -408,8 +413,6 @@ class TrayController(BaseController):
         self.menu.addSeparator()
         self.menu.addAction("Quit", QtWidgets.QApplication.instance().quit)
 
-        self.menu.aboutToShow.connect(self.onMenuAboutToShow)
-
         self.tray_icon = QtWidgets.QSystemTrayIcon(_tray_icon(), parent)
         self.tray_icon.setToolTip("Javelin")
         self.tray_icon.setContextMenu(self.menu)
@@ -417,10 +420,6 @@ class TrayController(BaseController):
 
     def show(self):
         self.tray_icon.show()
-
-    def onMenuAboutToShow(self):
-        view = self.launcher_controller.get_view()
-        self.toggle_action.setText("Hide Javelin" if view.isVisible() else "Show Javelin")
 
     def buildProjectsMenu(self):
         """Eagerly load every project and its commands, and build the whole submenu tree
@@ -464,16 +463,9 @@ class TrayController(BaseController):
         view.raise_()
         view.activateWindow()
 
-    def onToggleView(self):
-        view = self.launcher_controller.get_view()
-        if view.isVisible():
-            view.hide()
-        else:
-            self.showView()
-
     def onActivated(self, reason: QtWidgets.QSystemTrayIcon.ActivationReason):
         if reason == QtWidgets.QSystemTrayIcon.ActivationReason.Trigger:
-            self.onToggleView()
+            self.showView()
 
 
 SINGLE_INSTANCE_SERVER_NAME = "javelin-launcher"
