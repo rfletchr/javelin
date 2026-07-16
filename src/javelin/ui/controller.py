@@ -46,8 +46,5 @@ class PanelController(BaseController):
     def teardown(self):
         pass
 
-    def setProject(self, project: dict):
-        pass
-
     def setContext(self, context: ContextClasses | None):
         pass

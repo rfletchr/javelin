@@ -1,6 +1,6 @@
 from qtpy import QtCore, QtWidgets
 
-from javelin.project import ProjectManager
+from javelin.project import Project
 from javelin.ui.controller import BaseController, PanelController
 from javelin.ui.database import Database
 from javelin.ui.panel.shared import SharedData
@@ -30,7 +30,7 @@ class MyTasksController(BaseController):
 
     def __init__(
         self,
-        project_manager: ProjectManager,
+        project: Project,
         db: Database,
         shared_data: SharedData,
         view: MyTasksView | None = None,
@@ -39,10 +39,8 @@ class MyTasksController(BaseController):
         super().__init__(parent=parent)
         self._view = view or MyTasksView()
 
-        self.project_manager = project_manager
-
-        self.tasks_controller = TasksController(project_manager, db, shared_data, view=self._view.tasks_view)
-        self.workfiles_controller = WorkfilesController(project_manager, view=self._view.workfiles_view)
+        self.tasks_controller = TasksController(project, db, shared_data, view=self._view.tasks_view)
+        self.workfiles_controller = WorkfilesController(project, view=self._view.workfiles_view)
 
         self.tasks_controller.contextClicked.connect(self.workfiles_controller.setContext)
 
@@ -51,9 +49,8 @@ class MyTasksController(BaseController):
         self.workfiles_controller.workfileActivated.connect(self.workfileActivated)
         self.workfiles_controller.workfileCreated.connect(self.workfileCreated)
 
-    def setProject(self, project: dict):
-        self.tasks_controller.setProject(project)
-        self.workfiles_controller.clear()
+    def populate(self):
+        self.tasks_controller.populate()
 
 
 class TaskBrowserView(QtWidgets.QWidget):
@@ -79,7 +76,7 @@ class TaskBrowserController(BaseController):
 
     def __init__(
         self,
-        project_manager: ProjectManager,
+        project: Project,
         db: Database,
         shared_data: SharedData,
         view: TaskBrowserView | None = None,
@@ -88,11 +85,9 @@ class TaskBrowserController(BaseController):
         super().__init__(parent=parent)
         self._view = view or TaskBrowserView()
 
-        self.project_manager = project_manager
-
-        self.shots_controller = ShotsController(project_manager, db, shared_data, view=self._view.shots_view)
-        self.tasks_controller = TasksController(project_manager, db, shared_data, view=self._view.tasks_view)
-        self.workfiles_controller = WorkfilesController(project_manager, view=self._view.workfiles_view)
+        self.shots_controller = ShotsController(project, db, shared_data, view=self._view.shots_view)
+        self.tasks_controller = TasksController(project, db, shared_data, view=self._view.tasks_view)
+        self.workfiles_controller = WorkfilesController(project, view=self._view.workfiles_view)
 
         self.shots_controller.shotClicked.connect(self.onShotClicked)
         self.tasks_controller.contextClicked.connect(self.workfiles_controller.setContext)
@@ -107,9 +102,8 @@ class TaskBrowserController(BaseController):
         self.tasks_controller.setEntity(shot)
         self.workfiles_controller.clear()
 
-    def setProject(self, project: dict):
-        self.shots_controller.setProject(project)
-        self.workfiles_controller.clear()
+    def populate(self):
+        self.shots_controller.populate()
 
 
 class FileOpenView(QtWidgets.QWidget):
@@ -154,7 +148,7 @@ class FileOpenController(PanelController):
 
     def __init__(
         self,
-        project_manager: ProjectManager,
+        project: Project,
         db: Database,
         shared_data: SharedData,
         view: FileOpenView | None = None,
@@ -163,11 +157,9 @@ class FileOpenController(PanelController):
         super().__init__(parent=parent)
         self._view = view or FileOpenView()
 
-        self.project_manager = project_manager
-
-        self.my_tasks_controller = MyTasksController(project_manager, db, shared_data, view=self._view.my_tasks_view)
+        self.my_tasks_controller = MyTasksController(project, db, shared_data, view=self._view.my_tasks_view)
         self.task_browser_controller = TaskBrowserController(
-            project_manager, db, shared_data, view=self._view.task_browser_view
+            project, db, shared_data, view=self._view.task_browser_view
         )
 
         self.my_tasks_controller.busyChanged.connect(self.setBusy)
@@ -177,9 +169,9 @@ class FileOpenController(PanelController):
         self.task_browser_controller.workfileActivated.connect(self.workfileActivated)
         self.task_browser_controller.workfileCreated.connect(self.workfileCreated)
 
-    def setProject(self, project: dict):
-        self.my_tasks_controller.setProject(project)
-        self.task_browser_controller.setProject(project)
+    def populate(self):
+        self.my_tasks_controller.populate()
+        self.task_browser_controller.populate()
 
     def getView(self) -> FileOpenView:
         return self._view

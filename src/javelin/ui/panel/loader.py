@@ -1,6 +1,6 @@
 from qtpy import QtCore, QtWidgets
 
-from javelin.project import ProjectManager
+from javelin.project import Project
 from javelin.ui.controller import PanelController
 from javelin.ui.database import Database
 from javelin.ui.panel.publishes import PublishesController, PublishesView
@@ -64,7 +64,7 @@ class LoaderController(PanelController):
 
     def __init__(
         self,
-        project_manager: ProjectManager,
+        project: Project,
         db: Database,
         shared_data: SharedData,
         view: LoaderView | None = None,
@@ -74,22 +74,20 @@ class LoaderController(PanelController):
         self._view = view or LoaderView()
         self.shared_data = shared_data
 
-        self.publishes_controller = PublishesController(project_manager, db, view=self._view.publish_view)
-        self.shots_controller = ShotsController(project_manager, db, shared_data, view=self._view.shots_view)
+        self.publishes_controller = PublishesController(db, view=self._view.publish_view)
+        self.shots_controller = ShotsController(project, db, shared_data, view=self._view.shots_view)
 
         self.shots_controller.shotClicked.connect(self.onEntityClicked)
         self.shots_controller.busyChanged.connect(self.setBusy)
         self.publishes_controller.busyChanged.connect(self.setBusy)
         self.publishes_controller.publishActivated.connect(self.publishActivated)
         self._view.modeChanged.connect(self.onModeChanged)
-        self.__project: dict = {}
         self.__entity: dict = {}
         self.__current_mode = False
         self.__session_shot_id: int | None = None
 
-    def setProject(self, project: dict):
-        self.__project = project
-        self.shots_controller.setProject(project)
+    def populate(self):
+        self.shots_controller.populate()
 
     def selectShot(self, shot_id: int):
         """Record the session's current shot and switch to "Current" mode -- the default

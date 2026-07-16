@@ -189,7 +189,7 @@ class Database:
 
     # -- public API -------------------------------------------------------
     def user(self) -> dict:
-        self._get_connection()
+        self.get_connection()
         if not self.__credentials:
             raise RuntimeError("Not authenticated")
         return self.__credentials.user

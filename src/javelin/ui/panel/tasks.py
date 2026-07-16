@@ -1,8 +1,9 @@
 import logging
+import os
 
 from qtpy import QtCore, QtGui, QtWidgets
 
-from javelin.project import ProjectManager
+from javelin.project import Project
 from javelin.ui.controller import BaseController
 from javelin.ui.database import Database
 from javelin.ui.panel.shared import (
@@ -165,7 +166,7 @@ class TasksController(BaseController):
 
     def __init__(
         self,
-        project_manager: ProjectManager,
+        project: Project,
         database: Database,
         shared_data: SharedData,
         view: TasksView | None = None,
@@ -173,13 +174,13 @@ class TasksController(BaseController):
         compact: bool = False,
     ):
         super().__init__(parent=parent)
-        self.project_manager = project_manager
+        self.project = project
         self.database = database
         self.shared_data = shared_data
 
         self.model = GenerationalItemModel()
 
-        self.image_provider = ImageProviderModel("/mnt/projects")
+        self.image_provider = ImageProviderModel(os.path.dirname(project.directory))
         self.image_provider.setSourceModel(self.model)
 
         self.filter_model = QtCore.QSortFilterProxyModel()
@@ -199,10 +200,7 @@ class TasksController(BaseController):
         index = index.sibling(index.row(), 0)
 
         context_fields = index.data(ModelRoles.ContextFieldsRole)
-        project_name = context_fields["project"]
-        project = self.project_manager.get_project(project_name)
-
-        context = project.context_from_fields(context_fields)
+        context = self.project.context_from_fields(context_fields)
         self.contextClicked.emit(context)
 
     def onFilterChanged(self, text: str):
@@ -230,20 +228,20 @@ class TasksController(BaseController):
             .and_finally(on_complete)
         )
 
-    def setProject(self, project: dict):
-        logger.info("Set project: %s", project["tank_name"])
+    def populate(self):
+        logger.info("Populating tasks for project: %s", self.project)
         self.setBusy(True)
 
         def on_complete():
             self.setBusy(False)
-            logger.info("Project set: %s", project["tank_name"])
+            logger.info("Tasks populated for project: %s", self.project)
 
         (
             self.database.find(
                 self,
                 "Task",
                 [
-                    ["project", "is", project],
+                    ["project.Project.tank_name", "is", str(self.project)],
                     ["task_assignees", "is", self.database.user()],
                     ["sg_status_list", "not_in", ["omt", "na"]],
                 ],

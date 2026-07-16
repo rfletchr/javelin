@@ -393,7 +393,7 @@ class ImageProviderModel(QtCore.QIdentityProxyModel):
         entity_id: int,
     ):
         return os.path.join(
-            self.__projects_dir, project_name, "pipeline", "thumbnails", f"{entity_type}_{entity_id}.jpg"
+            self.__projects_dir, project_name, "init", "thumbnails", f"{entity_type}_{entity_id}.jpg"
         )
 
     def onImageLoaded(self, path: str, row: int, generation: int, image: QtGui.QImage):

@@ -3,10 +3,12 @@ import shiboken6
 from nukescripts import panels
 from qtpy import QtCore
 
+from javelin.project import Project
 from javelin.ui.panel.main import get_main_controller
 from javelin.nuke.controller import NukeController
 
-JAVELIN_MAIN_CONTROLLER = get_main_controller()
+JAVELIN_PROJECT = Project.from_environment()
+JAVELIN_MAIN_CONTROLLER = get_main_controller(JAVELIN_PROJECT)
 JAVELIN_MAIN_CONTROLLER.populate()
 JAVELIN_NUKE_CONTROLLER = NukeController()
 

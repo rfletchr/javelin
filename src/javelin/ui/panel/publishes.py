@@ -2,7 +2,6 @@ import typing
 
 from qtpy import QtCore, QtGui, QtWidgets
 
-from javelin.project import ProjectManager
 from javelin.ui.controller import BaseController
 from javelin.ui.database import Database
 from javelin.ui.panel.shared import GenerationalItemModel, IconProviderModel, ModelRoles, get_theme_icon
@@ -120,12 +119,9 @@ class PublishesView(QtWidgets.QWidget):
 class PublishesController(BaseController):
     publishActivated = QtCore.Signal(object)  # Publish  # type: ignore
 
-    def __init__(
-        self, project_manager: ProjectManager, database: Database, view: PublishesView | None = None, parent=None
-    ):
+    def __init__(self, database: Database, view: PublishesView | None = None, parent=None):
         super().__init__(parent=parent)
         self.database = database
-        self.project_manager = project_manager
 
         self.view = view or PublishesView()
 

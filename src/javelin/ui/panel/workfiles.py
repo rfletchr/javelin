@@ -7,7 +7,7 @@ import typing
 
 from qtpy import QtCore, QtGui, QtWidgets
 
-from javelin.project import ContextClasses, Project, ProjectManager, Workfile, WorkfileDefinition
+from javelin.project import ContextClasses, Project, Workfile, WorkfileDefinition
 from javelin.ui.controller import BaseController
 from javelin.ui.panel.shared import GenerationalItemModel, IconProviderModel, ModelRoles, get_theme_icon
 
@@ -102,12 +102,12 @@ class WorkfilesController(BaseController):
 
     def __init__(
         self,
-        project_manager: ProjectManager,
+        project: Project,
         view: WorkfilesView | None = None,
         parent=None,
     ):
         super().__init__(parent=parent)
-        self.project_manager = project_manager
+        self.project = project
 
         self.model = GenerationalItemModel(self)
         self.icon_provider = IconProviderModel(self)
@@ -116,7 +116,6 @@ class WorkfilesController(BaseController):
         self.view = view or WorkfilesView()
         self.view.setModel(self.icon_provider)
 
-        self.__project: Project | None = None
         self.__context: ContextClasses | None = None
 
         self.view.workfileActivated.connect(self.onWorkfileActivated)
@@ -124,25 +123,22 @@ class WorkfilesController(BaseController):
 
     def setContext(self, context: ContextClasses):
         self.__context = context
-        self.__project = self.project_manager.get_project(context.project)
-
         self.view.setNewFileDefinitions(context.definition.workfiles)
         self.refresh()
 
     def clear(self):
-        self.__project = None
         self.__context = None
         self.refresh()
 
     def refresh(self):
         rows: list[list[QtGui.QStandardItem]] = []
 
-        if self.__project is not None and self.__context is not None:
+        if self.__context is not None:
             self.setBusy(True)
             try:
                 all_workfiles: list[Workfile] = []
                 for definition in self.__context.definition.workfiles:
-                    all_workfiles.extend(self.__project.list_workfiles(self.__context, definition))
+                    all_workfiles.extend(self.project.list_workfiles(self.__context, definition))
 
                 groups = _group_workfiles(all_workfiles, key=lambda wf: (wf.name, os.path.splitext(wf.path)[1].lower()))
 
@@ -167,12 +163,12 @@ class WorkfilesController(BaseController):
             self.workfileActivated.emit(workfile)
 
     def onNewFileTriggered(self, definition: WorkfileDefinition, template_name: str):
-        if self.__project is None or self.__context is None:
+        if self.__context is None:
             return
 
         self.setBusy(True)
         try:
-            workfile = self._createWorkfile(self.__project, self.__context, definition, template_name)
+            workfile = self._createWorkfile(self.project, self.__context, definition, template_name)
         finally:
             self.setBusy(False)
 

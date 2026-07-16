@@ -1,32 +1,65 @@
 import logging
 
-from qtpy import QtCore, QtWidgets
+from qtpy import QtCore, QtGui, QtWidgets
 
-from javelin.project import ContextClasses, ProjectManager
+from javelin.project import AssetContext, ContextClasses, EpisodicShotContext, Project, ShotContext
 from javelin.publish import task_filters_for_context
 from javelin.ui.controller import BaseController, PanelController
 from javelin.ui.database import Database, get_database
 from javelin.ui.panel.file_open import FileOpenController
 from javelin.ui.panel.loader import LoaderController
-from javelin.ui.panel.projects import ProjectsController, ProjectsView
 from javelin.ui.panel.shared import SharedData
 
 logger = logging.getLogger(__name__)
 
 
+def _context_label(context: ContextClasses) -> str:
+    if isinstance(context, AssetContext):
+        entity = f"{context.asset}"
+    elif isinstance(context, EpisodicShotContext):
+        entity = f"{context.shot}"
+    elif isinstance(context, ShotContext):
+        entity = f"{context.shot}"
+    else:
+        raise TypeError(f"unhandled context type: {type(context)}")
+
+    return f"{entity} / {context.task}"
+
+
 class MainView(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self._projects_view = ProjectsView()
+        self.project_label = QtWidgets.QLabel()
+        self.project_label.setObjectName("project_label")
+        self.context_label = QtWidgets.QLabel()
+        self.context_label.setObjectName("context_label")
+
+        header_layout = QtWidgets.QHBoxLayout()
+        header_layout.addWidget(self.project_label)
+        header_layout.addStretch(1)
+        header_layout.addWidget(self.context_label)
+
         self.tab_view = QtWidgets.QTabWidget()
 
         main_layout = QtWidgets.QVBoxLayout()
-        main_layout.addWidget(self._projects_view)
+        main_layout.addLayout(header_layout)
         main_layout.addWidget(self.tab_view)
         self.setLayout(main_layout)
 
-    def getProjectsView(self) -> ProjectsView:
-        return self._projects_view
+        self.setStyleSheet(
+            """
+            MainView QLabel#context_label {
+                color: palette(placeholder-text);
+            }
+            """
+        )
+
+    def setProjectName(self, name: str):
+        self.project_label.setText(name)
+
+    def setContextText(self, text: str):
+        self.context_label.setText(text)
+        self.context_label.setVisible(bool(text))
 
     def addTab(self, name: str, widget: QtWidgets.QWidget):
         self.tab_view.addTab(widget, name)
@@ -50,28 +83,29 @@ class MainController(BaseController):
 
     def __init__(
         self,
-        project_manager: ProjectManager,
+        project: Project,
         database: Database,
         shared_data: SharedData,
         view: MainView | None = None,
         parent=None,
     ):
         super().__init__(parent=parent)
-        self.project_manager = project_manager
+        self.project = project
         self.database = database
         self.view = view or MainView()
         self.shared_data = shared_data
         self._panel_controllers: list[PanelController] = []
 
-        self.projects_controller = ProjectsController(project_manager, database, view=self.view.getProjectsView())
-        self.file_open_controller = FileOpenController(project_manager, database, shared_data)
-        self.loader_controller = LoaderController(project_manager, database, shared_data)
+        self.file_open_controller = FileOpenController(project, database, shared_data)
+        self.loader_controller = LoaderController(project, database, shared_data)
 
         self.addTabController(self.file_open_controller)
         self.addTabController(self.loader_controller)
 
+        self.view.setProjectName(str(self.project))
+        self.view.setContextText("")
+
         self.busyChanged.connect(self.view.setBusy)
-        self.projects_controller.busyChanged.connect(self.setBusy)
 
         self.file_open_controller.workfileActivated.connect(self.workfileActivated)
         self.file_open_controller.workfileCreated.connect(self.workfileCreated)
@@ -85,31 +119,50 @@ class MainController(BaseController):
     def addTabController(self, controller: PanelController):
         self.addTab(controller.getName(), controller.getView())
         controller.busyChanged.connect(self.setBusy)
-        self.projects_controller.projectChanged.connect(controller.setProject)
         self._panel_controllers.append(controller)
 
     def populate(self):
-        logger.info("Populating launcher...")
-        self.projects_controller.populate()
+        logger.info("Populating panel for project: %s", self.project)
+        self.file_open_controller.populate()
+        self.loader_controller.populate()
+        self.loadProjectName()
+
+    def loadProjectName(self):
+        tank_name = str(self.project)
+        self.database.find_one(
+            self,
+            "Project",
+            [["tank_name", "is", tank_name]],
+            ["name"],
+        ).then(self.onProjectFetched)
+
+    def onProjectFetched(self, entity: dict | None):
+        if entity is None:
+            logger.warning("No ShotGrid Project found for tank_name: %s", self.project)
+            return
+        self.view.setProjectName(entity["name"])
 
     def setSessionWorkfile(self, path: str):
-        project_name = self.project_manager.project_name_from_path(path)
-        project = self.project_manager.get_project(project_name)
-        context = project.context_from_path(path)
+        try:
+            context = self.project.context_from_path(path)
+        except ValueError:
+            logger.info("Path is not part of this project's pipeline, skipping: %s", path)
+            return
         self.setSessionContext(context)
 
     def clearSessionContext(self):
         """Cheap, synchronous reset of session-context state (e.g. once the scene closes):
-        disables "Current" mode in the Loader and forgets its session shot. Leaves the picked
-        project alone."""
+        disables "Current" mode in the Loader and forgets its session shot."""
+        self.view.setContextText("")
         self.loader_controller.clearSessionShot()
         for controller in self._panel_controllers:
             controller.setContext(None)
 
     def setSessionContext(self, context: ContextClasses):
         """Notify every panel of the raw context, then resolve it to its ShotGrid Task and
-        drive the panel to match: switches the selected project and, once its shots are
-        loaded, selects the context's shot in the Loader view."""
+        select the context's shot in the Loader view."""
+        self.view.setContextText(_context_label(context))
+
         for controller in self._panel_controllers:
             controller.setContext(context)
 
@@ -121,14 +174,13 @@ class MainController(BaseController):
                 return
 
             self.loader_controller.selectShot(task["entity"]["id"])
-            self.projects_controller.selectProjectByName(task["project.Project.tank_name"])
 
         (
             self.database.find_one(
                 self,
                 "Task",
                 task_filters_for_context(context),
-                ["project", "entity", "project.Project.tank_name"],
+                ["entity"],
             )
             .then(on_resolved)
             .and_finally(lambda: self.setBusy(False))
@@ -138,22 +190,20 @@ class MainController(BaseController):
         return self.view
 
 
-def get_main_controller():
-    db = get_database()
-    manager = ProjectManager("/mnt/projects")
+def get_main_controller(project: Project):
     db = get_database()
     shared_data = SharedData.from_db(db)
 
-    return MainController(manager, db, shared_data)
+    return MainController(project, db, shared_data)
 
 
 def main():
-
     logging.basicConfig(level=logging.INFO)
-    logger.info("Launching Rock UI launcher...")
+    logger.info("Launching Javelin panel...")
 
     app = QtWidgets.QApplication([])
-    controller = get_main_controller()
+    project = Project.from_environment()
+    controller = get_main_controller(project)
     controller.populate()
     controller.view.show()
     app.exec()

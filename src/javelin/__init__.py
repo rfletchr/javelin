@@ -4,10 +4,12 @@ __all__ = [
     "EpisodicShotContext",
     "PathTemplate",
     "Project",
-    "ProjectManager",
     "PublishDefinition",
     "ShotContext",
     "WorkfileDefinition",
+    "ContextClasses",
+    "list_projects",
+    "CommandDefinition",
 ]
 
 from .project import (
@@ -15,9 +17,11 @@ from .project import (
     ContextDefinition,
     EpisodicShotContext,
     Project,
-    ProjectManager,
     PublishDefinition,
     ShotContext,
     WorkfileDefinition,
+    ContextClasses,
+    list_projects,
+    CommandDefinition,
 )
 from .templates import PathTemplate

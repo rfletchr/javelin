@@ -6,54 +6,60 @@ import typing
 from javelin import templates as templateslib
 from javelin import utils as utilslib
 
+PROJECT_PATH_ENV_VAR = "JAVELIN_PROJECT_PATH"
 
-class ProjectManager:
-    def __init__(self, projects_dir: str):
-        self.__projects_dir = projects_dir
 
-    @property
-    def projects_dir(self) -> str:
-        return self.__projects_dir
+def list_projects(projects_dir: str) -> list[str]:
+    """List the names of projects under `projects_dir` that have an init/init.py."""
+    result = []
+    for name in sorted(os.listdir(projects_dir)):
+        if os.path.exists(_init_path(projects_dir, name)):
+            result.append(name)
+    return result
 
-    def project_name_from_path(self, path: str) -> str:
-        """
-        Get the name of the project the path is a member of.
-        """
-        if not os.path.commonpath([path, self.__projects_dir]):
-            raise ValueError(f"Path {path} is not within the projects directory")
 
-        rel_path = os.path.relpath(path, self.__projects_dir)
-        return rel_path.split(os.path.sep)[0]
-
-    def init_path(self, project_name: str) -> str:
-        return os.path.join(self.__projects_dir, project_name, "pipeline", "init.py")
-
-    def get_project(self, name: str):
-        return Project.from_directory(self, os.path.join(self.__projects_dir, name))
+def _init_path(projects_dir: str, project_name: str) -> str:
+    return os.path.join(projects_dir, project_name, "init", "init.py")
 
 
 class Project:
     @classmethod
-    def from_directory(cls, manager: ProjectManager, directory: str):
-        init_path = manager.init_path(os.path.basename(directory))
+    def from_directory(cls, directory: str) -> Project:
+        init_path = _init_path(os.path.dirname(directory), os.path.basename(directory))
         if not os.path.exists(init_path):
             raise FileNotFoundError(f"no init.py found in {directory}")
 
         module = utilslib.load_module_from_path(init_path)
-        return typing.cast(Project, getattr(module, "init")(manager, directory))
+        return typing.cast(Project, getattr(module, "init")(directory))
+
+    @classmethod
+    def from_name(cls, projects_dir: str, name: str) -> Project:
+        return cls.from_directory(os.path.join(projects_dir, name))
+
+    @classmethod
+    def from_environment(cls) -> Project:
+        directory = os.environ[PROJECT_PATH_ENV_VAR]
+        return cls.from_directory(directory)
 
     def __init__(
         self,
-        manager: ProjectManager,
         directory: str,
         templates: dict[str, templateslib.PathTemplate],
         context_definitions: tuple[ContextDefinition, ...],
+        commands: tuple[CommandDefinition, ...],
     ):
-        self.__pipeline = manager
         self.__directory = directory
-        self.__name = os.path.basename(directory)
+        self.__name = os.path.basename(os.path.normpath(directory))
         self.__templates = templates
         self.__context_definitions = context_definitions
+        self.__commands = commands
+
+    @property
+    def directory(self) -> str:
+        return self.__directory
+
+    def commands(self):
+        return self.__commands
 
     def templates(self):
         return self.__templates.copy()
@@ -80,7 +86,7 @@ class Project:
         if os.path.isabs(rel):
             return rel
 
-        return os.path.join(self.__directory, "pipeline", "templates", rel)
+        return os.path.join(self.__directory, "init", "templates", rel)
 
     def list_workfiles(self, context: ContextClasses, workfile_definition: WorkfileDefinition):
         result = []
@@ -154,6 +160,12 @@ class Workfile(typing.NamedTuple):
     version: int
     path: str
     context: ContextClasses
+
+
+class CommandDefinition(typing.NamedTuple):
+    label: str
+    command: list[str]
+    extension: str
 
 
 ContextClasses = AssetContext | ShotContext | EpisodicShotContext

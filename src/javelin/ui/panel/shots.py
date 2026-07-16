@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
+
 from qtpy import QtCore, QtGui, QtWidgets
 
-from javelin.project import ProjectManager
+from javelin.project import Project
 from javelin.ui.controller import BaseController
 from javelin.ui.database import Database
 from javelin.ui.panel.shared import (
@@ -93,20 +95,20 @@ class ShotsController(BaseController):
 
     def __init__(
         self,
-        project_manager: ProjectManager,
+        project: Project,
         db: Database,
         shared_data: SharedData,
         view: ShotsView | None = None,
         parent=None,
     ):
         super().__init__(parent=parent)
-        self.project_manager = project_manager
+        self.project = project
         self.db = db
         self.shared_data = shared_data
 
         self.model = GenerationalItemModel()
 
-        self.images_model = ImageProviderModel("/mnt/projects")  # TODO: inject
+        self.images_model = ImageProviderModel(os.path.dirname(project.directory))
         self.images_model.setSourceModel(self.model)
 
         self.filter_model = QtCore.QSortFilterProxyModel()
@@ -122,10 +124,12 @@ class ShotsController(BaseController):
         self.view.shotClicked.connect(self.onShotClicked)
         self.view.shotFilterChanged.connect(self.filter_model.setFilterFixedString)
 
-    def setProject(self, project: dict):
+    def populate(self):
         self.setBusy(True)
         (
-            self.db.find(self, "Shot", [["project", "is", project]], fields=ShotItem.fields())
+            self.db.find(
+                self, "Shot", [["project.Project.tank_name", "is", str(self.project)]], fields=ShotItem.fields()
+            )
             .then(self.onShotsFetched)
             .and_finally(lambda: self.setBusy(False))
         )
