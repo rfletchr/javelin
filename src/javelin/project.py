@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 import typing
 
 from javelin import templates as templateslib
 from javelin import utils as utilslib
+
+logger = logging.getLogger(__name__)
 
 PROJECT_PATH_ENV_VAR = "JAVELIN_PROJECT_PATH"
 
@@ -24,6 +27,7 @@ def _init_path(projects_dir: str, project_name: str) -> str:
 
 class Project:
     @classmethod
+    @utilslib.log_timing(logger)
     def from_directory(cls, directory: str) -> Project:
         init_path = _init_path(os.path.dirname(directory), os.path.basename(directory))
         if not os.path.exists(init_path):

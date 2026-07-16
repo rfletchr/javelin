@@ -1,5 +1,6 @@
 import logging
 import os
+import pathlib
 import signal
 import subprocess
 import urllib.error
@@ -8,6 +9,7 @@ import urllib.request
 from qtpy import QtCore, QtGui, QtNetwork, QtWidgets
 
 from javelin.project import CommandDefinition, Project, list_projects
+from javelin.ui import icons as icon_assets
 from javelin.ui.controller import BaseController
 from javelin.ui.database import Database, get_database
 from javelin.ui.panel.shared import IconProviderModel, ModelRoles
@@ -99,6 +101,7 @@ class ProjectListView(QtWidgets.QWidget):
 
 class ProjectListController(BaseController):
     projectSelected = QtCore.Signal(str)
+    populated = QtCore.Signal()
 
     def __init__(self, projects_dir: str, database: Database, view: ProjectListView | None = None, parent=None):
         super().__init__(parent=parent)
@@ -127,6 +130,8 @@ class ProjectListController(BaseController):
         self.model.clear()
         for tank_name in tank_names:
             self.model.appendRow(ProjectItem(tank_name, self.getDisplayName(tank_name)))
+
+        self.populated.emit()
 
     def getDisplayName(self, tank_name: str) -> str:
         return self.__display_names.get(tank_name, tank_name)
@@ -362,8 +367,19 @@ class LauncherController(BaseController):
         return self.view
 
 
+_ICONS_DIR = pathlib.Path(icon_assets.__file__).resolve().parent
+_ICON_PATH = _ICONS_DIR / "icon.png"
+
+
+def _command_icon(command: CommandDefinition) -> QtGui.QIcon:
+    icon_path = _ICONS_DIR / f"{command.extension}.png"
+    return QtGui.QIcon(str(icon_path)) if icon_path.is_file() else QtGui.QIcon()
+
+
 def _tray_icon() -> QtGui.QIcon:
-    icon = QtGui.QIcon.fromTheme("applications-graphics")
+    icon = QtGui.QIcon(str(_ICON_PATH))
+    if icon.isNull():
+        icon = QtGui.QIcon.fromTheme("applications-graphics")
     if icon.isNull():
         icon = QtWidgets.QApplication.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon)
     return icon
@@ -377,15 +393,17 @@ class TrayController(BaseController):
         super().__init__(parent=parent)
         self.launcher_controller = launcher_controller
         self._project_cache: dict[str, Project] = {}
-        self._project_submenus: dict[str, QtWidgets.QMenu] = {}
 
         self.menu = QtWidgets.QMenu()
         self.toggle_action = self.menu.addAction("Hide Javelin", self.onToggleView)
         self.menu.addSeparator()
 
         self.projects_menu = self.menu.addMenu("Projects")
-        self.populateProjectsMenu()
-        self.projects_menu.aboutToShow.connect(self.onProjectsMenuAboutToShow)
+        self.buildProjectsMenu()
+        # ShotGrid display names usually aren't back yet when we build the menu above
+        # (that fetch is async) - rebuild once, when they land, rather than resolving
+        # anything lazily on open.
+        launcher_controller.project_list_controller.populated.connect(self.buildProjectsMenu)
 
         self.menu.addSeparator()
         self.menu.addAction("Quit", QtWidgets.QApplication.instance().quit)
@@ -404,52 +422,32 @@ class TrayController(BaseController):
         view = self.launcher_controller.get_view()
         self.toggle_action.setText("Hide Javelin" if view.isVisible() else "Show Javelin")
 
-    def populateProjectsMenu(self):
-        """Build one submenu per project up front, each seeded with a placeholder action.
+    def buildProjectsMenu(self):
+        """Eagerly load every project and its commands, and build the whole submenu tree
+        up front - nothing is resolved lazily on open, so there's no rebuild/flicker while
+        the menu is already showing."""
+        self.projects_menu.clear()
+        self._project_cache.clear()
 
-        GNOME/KDE render this menu out-of-process over DBusMenu, which decides whether an
-        item is expandable from its children at the moment the menu is first serialized.
-        A submenu that's still empty at that point never gets an arrow and never becomes
-        clickable, so its own aboutToShow (where we'd normally populate lazily) never fires.
-        The placeholder guarantees each submenu is always non-empty.
-        """
         projects_dir = self.launcher_controller.projects_dir
+        display_names = self.launcher_controller.project_list_controller
 
         for tank_name in list_projects(projects_dir):
-            submenu = self.projects_menu.addMenu(tank_name)
-            submenu.addAction("Loading...").setEnabled(False)
-            submenu.aboutToShow.connect(
-                lambda tank_name=tank_name, submenu=submenu: self.onProjectSubmenuAboutToShow(tank_name, submenu)
-            )
-            self._project_submenus[tank_name] = submenu
+            try:
+                project = Project.from_name(projects_dir, tank_name)
+            except Exception:
+                logger.exception("Failed to load project for tray menu: %s", tank_name)
+                continue
 
-    def onProjectsMenuAboutToShow(self):
-        # Refresh labels only - rebuilding the submenus themselves would empty them again
-        # and reintroduce the "never expandable" problem described above.
-        display_names = self.launcher_controller.project_list_controller
-        for tank_name, submenu in self._project_submenus.items():
-            submenu.menuAction().setText(display_names.getDisplayName(tank_name))
+            self._project_cache[tank_name] = project
 
-    def onProjectSubmenuAboutToShow(self, tank_name: str, submenu: QtWidgets.QMenu):
-        if tank_name in self._project_cache:
-            return  # already populated from a previous open
-
-        try:
-            project = Project.from_name(self.launcher_controller.projects_dir, tank_name)
-        except Exception:
-            logger.exception("Failed to load project for tray menu: %s", tank_name)
-            submenu.clear()
-            submenu.addAction("Failed to load project").setEnabled(False)
-            return
-
-        self._project_cache[tank_name] = project
-
-        submenu.clear()
-        for command in project.commands():
-            submenu.addAction(
-                command.label,
-                lambda tank_name=tank_name, command=command: self.launchCommand(tank_name, command),
-            )
+            submenu = self.projects_menu.addMenu(display_names.getDisplayName(tank_name))
+            for command in project.commands():
+                submenu.addAction(
+                    _command_icon(command),
+                    command.label,
+                    lambda tank_name=tank_name, command=command: self.launchCommand(tank_name, command),
+                )
 
     def launchCommand(self, tank_name: str, command: CommandDefinition):
         project = self._project_cache[tank_name]
@@ -569,6 +567,9 @@ def main():
     logger.info("Launching Javelin launcher...")
 
     app = QtWidgets.QApplication([])
+    app.setApplicationName("Javelin Launcher")
+    app.setWindowIcon(_tray_icon())
+
     app.setQuitOnLastWindowClosed(False)
     signal_timer = _install_signal_handlers(app)  # noqa: F841 - keeps the timer alive
 
