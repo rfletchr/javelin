@@ -4,7 +4,6 @@ from javelin.project import Project
 from javelin.ui.controller import PanelController
 from javelin.ui.database import Database
 from javelin.ui.panel.publishes import PublishesController, PublishesView
-from javelin.ui.panel.shared import SharedData
 from javelin.ui.panel.shots import ShotsController, ShotsView
 
 
@@ -66,16 +65,14 @@ class LoaderController(PanelController):
         self,
         project: Project,
         db: Database,
-        shared_data: SharedData,
         view: LoaderView | None = None,
         parent: QtCore.QObject | None = None,
     ):
         super().__init__(parent=parent)
         self._view = view or LoaderView()
-        self.shared_data = shared_data
 
         self.publishes_controller = PublishesController(db, view=self._view.publish_view)
-        self.shots_controller = ShotsController(project, db, shared_data, view=self._view.shots_view)
+        self.shots_controller = ShotsController(project, db, view=self._view.shots_view)
 
         self.shots_controller.shotClicked.connect(self.onEntityClicked)
         self.shots_controller.busyChanged.connect(self.setBusy)

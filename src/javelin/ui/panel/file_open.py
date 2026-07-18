@@ -3,7 +3,6 @@ from qtpy import QtCore, QtWidgets
 from javelin.project import Project
 from javelin.ui.controller import BaseController, PanelController
 from javelin.ui.database import Database
-from javelin.ui.panel.shared import SharedData
 from javelin.ui.panel.shots import ShotsController, ShotsView
 from javelin.ui.panel.tasks import TasksController, TasksView
 from javelin.ui.panel.workfiles import WorkfilesController, WorkfilesView
@@ -32,14 +31,13 @@ class MyTasksController(BaseController):
         self,
         project: Project,
         db: Database,
-        shared_data: SharedData,
         view: MyTasksView | None = None,
         parent: QtCore.QObject | None = None,
     ):
         super().__init__(parent=parent)
         self._view = view or MyTasksView()
 
-        self.tasks_controller = TasksController(project, db, shared_data, view=self._view.tasks_view)
+        self.tasks_controller = TasksController(project, db, view=self._view.tasks_view)
         self.workfiles_controller = WorkfilesController(project, view=self._view.workfiles_view)
 
         self.tasks_controller.contextClicked.connect(self.workfiles_controller.setContext)
@@ -78,15 +76,14 @@ class TaskBrowserController(BaseController):
         self,
         project: Project,
         db: Database,
-        shared_data: SharedData,
         view: TaskBrowserView | None = None,
         parent: QtCore.QObject | None = None,
     ):
         super().__init__(parent=parent)
         self._view = view or TaskBrowserView()
 
-        self.shots_controller = ShotsController(project, db, shared_data, view=self._view.shots_view)
-        self.tasks_controller = TasksController(project, db, shared_data, view=self._view.tasks_view)
+        self.shots_controller = ShotsController(project, db, view=self._view.shots_view)
+        self.tasks_controller = TasksController(project, db, view=self._view.tasks_view)
         self.workfiles_controller = WorkfilesController(project, view=self._view.workfiles_view)
 
         self.shots_controller.shotClicked.connect(self.onShotClicked)
@@ -150,17 +147,14 @@ class FileOpenController(PanelController):
         self,
         project: Project,
         db: Database,
-        shared_data: SharedData,
         view: FileOpenView | None = None,
         parent: QtCore.QObject | None = None,
     ):
         super().__init__(parent=parent)
         self._view = view or FileOpenView()
 
-        self.my_tasks_controller = MyTasksController(project, db, shared_data, view=self._view.my_tasks_view)
-        self.task_browser_controller = TaskBrowserController(
-            project, db, shared_data, view=self._view.task_browser_view
-        )
+        self.my_tasks_controller = MyTasksController(project, db, view=self._view.my_tasks_view)
+        self.task_browser_controller = TaskBrowserController(project, db, view=self._view.task_browser_view)
 
         self.my_tasks_controller.busyChanged.connect(self.setBusy)
         self.task_browser_controller.busyChanged.connect(self.setBusy)

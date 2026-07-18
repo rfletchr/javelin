@@ -1,5 +1,6 @@
 import logging
 import os
+import typing
 
 from qtpy import QtCore, QtGui, QtWidgets
 
@@ -11,9 +12,9 @@ from javelin.ui.panel.shared import (
     GenerationalItemModel,
     ImageProviderModel,
     ModelRoles,
-    SharedData,
     StampListView,
 )
+from javelin.ui.promise import PromiseAll
 
 ItemDataRole = QtCore.Qt.ItemDataRole
 SelectionMode = QtWidgets.QAbstractItemView.SelectionMode
@@ -133,8 +134,8 @@ def _build_context_fields(task: dict) -> dict:
     return value
 
 
-def _make_task_row(task_entity: dict, shared_data: SharedData) -> list[QtGui.QStandardItem]:
-    status_name = shared_data.status_code_to_name[task_entity["sg_status_list"]]
+def _make_task_row(task_entity: dict, status_code_to_name: dict[str, str]) -> list[QtGui.QStandardItem]:
+    status_name = status_code_to_name[task_entity["sg_status_list"]]
 
     name_item = QtGui.QStandardItem(task_entity["content"])
     name_item.setEditable(False)
@@ -168,7 +169,6 @@ class TasksController(BaseController):
         self,
         project: Project,
         database: Database,
-        shared_data: SharedData,
         view: TasksView | None = None,
         parent=None,
         compact: bool = False,
@@ -176,7 +176,6 @@ class TasksController(BaseController):
         super().__init__(parent=parent)
         self.project = project
         self.database = database
-        self.shared_data = shared_data
 
         self.model = GenerationalItemModel()
 
@@ -214,18 +213,12 @@ class TasksController(BaseController):
             self.setBusy(False)
             logger.info("Entity set: %s", entity)
 
-        (
-            self.database.find(
-                self,
-                "Task",
-                [
-                    ["entity", "is", entity],
-                    ["sg_status_list", "not_in", ["omt", "na"]],
-                ],
-                _TASK_FIELDS,
-            )
-            .then(self.onTasksFetched)
-            .and_finally(on_complete)
+        self.__fetchTasks(
+            [
+                ["entity", "is", entity],
+                ["sg_status_list", "not_in", ["omt", "na"]],
+            ],
+            on_complete,
         )
 
     def populate(self):
@@ -236,22 +229,31 @@ class TasksController(BaseController):
             self.setBusy(False)
             logger.info("Tasks populated for project: %s", self.project)
 
+        self.__fetchTasks(
+            [
+                ["project.Project.tank_name", "is", str(self.project)],
+                ["task_assignees", "is", self.database.user()],
+                ["sg_status_list", "not_in", ["omt", "na"]],
+            ],
+            on_complete,
+        )
+
+    def __fetchTasks(self, filters: list, on_complete: typing.Callable[[], None]):
         (
-            self.database.find(
-                self,
-                "Task",
+            PromiseAll(
                 [
-                    ["project.Project.tank_name", "is", str(self.project)],
-                    ["task_assignees", "is", self.database.user()],
-                    ["sg_status_list", "not_in", ["omt", "na"]],
-                ],
-                _TASK_FIELDS,
+                    self.database.find(self, "Task", filters, _TASK_FIELDS),
+                    self.database.find(self, "Status", [], ["code", "name"]),
+                ]
             )
             .then(self.onTasksFetched)
             .and_finally(on_complete)
         )
 
-    def onTasksFetched(self, entities: dict):
-        logger.info("Tasks fetched: %d", len(entities))
-        self.model.setItems([_make_task_row(row, self.shared_data) for row in entities])
+    def onTasksFetched(self, results: tuple[list[dict], list[dict]]):
+        tasks, statuses = results
+        status_code_to_name = {status["code"]: status["name"] for status in statuses}
+
+        logger.info("Tasks fetched: %d", len(tasks))
+        self.model.setItems([_make_task_row(row, status_code_to_name) for row in tasks])
         self.model.setHorizontalHeaderLabels(["Task", "Status"])

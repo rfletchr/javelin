@@ -169,7 +169,7 @@ class Workfile(typing.NamedTuple):
 class CommandDefinition(typing.NamedTuple):
     label: str
     command: list[str]
-    extension: str
+    icon: str | None = None
 
 
 ContextClasses = AssetContext | ShotContext | EpisodicShotContext

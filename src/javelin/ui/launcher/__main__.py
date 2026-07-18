@@ -1,18 +1,18 @@
 import logging
 import os
-import pathlib
 import signal
 import subprocess
 import urllib.error
 import urllib.request
 
+import qtawesome as qta
 from qtpy import QtCore, QtGui, QtNetwork, QtWidgets
 
 from javelin.project import CommandDefinition, Project, list_projects
-from javelin.ui import icons as icon_assets
+from javelin.ui import icon_resources
 from javelin.ui.controller import BaseController
 from javelin.ui.database import Database, get_database
-from javelin.ui.panel.shared import IconProviderModel, ModelRoles
+from javelin.ui.login import LoginController, LoginView
 
 ItemDataRole = QtCore.Qt.ItemDataRole
 
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 PROJECTS_DIR_ENV_VAR = "JAVELIN_PROJECTS_DIR"
 DEFAULT_PROJECTS_DIR = "/mnt/projects"
 USER_IMAGE_SIZE = 32
+PROJECT_IMAGE_SIZE = 48
 
 
 class CommandItem(QtGui.QStandardItem):
@@ -28,122 +29,108 @@ class CommandItem(QtGui.QStandardItem):
         super().__init__(command.label)
         self.setEditable(False)
         self.setData(command, ItemDataRole.UserRole)
-        self.setData(f"{command.label}.{command.extension}", ModelRoles.PathRole)
-
-
-class CommandListView(QtWidgets.QWidget):
-    commandActivated = QtCore.Signal(QtCore.QModelIndex)  # type: ignore
-
-    def __init__(self, parent=None):
-        super().__init__(parent=parent)
-        self.command_list = QtWidgets.QListView()
-        self.command_list.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.command_list)
-
-        self.command_list.activated.connect(self.commandActivated)
-
-    def setModel(self, model):
-        self.command_list.setModel(model)
-
-
-class CommandListController(BaseController):
-    commandActivated = QtCore.Signal(object)  # CommandDefinition  # type: ignore
-
-    def __init__(self, view: CommandListView | None = None, parent=None):
-        super().__init__(parent=parent)
-        self.view = view or CommandListView()
-
-        self.model = QtGui.QStandardItemModel(self)
-        self.icon_model = IconProviderModel(self)
-        self.icon_model.setSourceModel(self.model)
-        self.view.setModel(self.icon_model)
-
-        self.view.commandActivated.connect(self.onCommandActivated)
-
-    def setProject(self, project: Project):
-        self.model.clear()
-        for command in project.commands():
-            self.model.appendRow(CommandItem(command))
-
-    def onCommandActivated(self, index: QtCore.QModelIndex):
-        if not index.isValid():
-            return
-        self.commandActivated.emit(index.data(ItemDataRole.UserRole))
+        self.setIcon(_command_icon(command))
 
 
 class ProjectItem(QtGui.QStandardItem):
-    def __init__(self, tank_name: str, display_name: str):
+    def __init__(self, tank_name: str, display_name: str, commands: tuple[CommandDefinition, ...]):
         super().__init__(display_name)
         self.setEditable(False)
         self.setData(tank_name, ItemDataRole.UserRole)
+        for command in commands:
+            self.appendRow(CommandItem(command))
+
+    def setImage(self, pixmap: QtGui.QPixmap):
+        self.setIcon(QtGui.QIcon(pixmap))
 
 
-class ProjectListView(QtWidgets.QWidget):
-    projectActivated = QtCore.Signal(QtCore.QModelIndex)  # type: ignore
+class ProjectModelController(BaseController):
+    """Owns a single two-level model - top-level rows are projects, each with its
+    CommandDefinitions as child rows. The project list and command list views (and the
+    tray's Projects menu) all read from this one shared, eagerly-loaded tree using
+    different root indexes, instead of each re-scanning disk / re-running every project's
+    init.py independently."""
 
-    def __init__(self, parent=None):
-        super().__init__(parent=parent)
-        self.project_list = QtWidgets.QListView()
-        self.project_list.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.project_list)
-
-        self.project_list.activated.connect(self.projectActivated)
-
-    def setModel(self, model):
-        self.project_list.setModel(model)
-
-
-class ProjectListController(BaseController):
-    projectSelected = QtCore.Signal(str)
     populated = QtCore.Signal()
 
-    def __init__(self, projects_dir: str, database: Database, view: ProjectListView | None = None, parent=None):
+    def __init__(self, projects_dir: str, database: Database, parent=None):
         super().__init__(parent=parent)
         self.projects_dir = projects_dir
         self.database = database
-        self.view = view or ProjectListView()
+        self.projects: dict[str, Project] = {}
         self.__display_names: dict[str, str] = {}
 
         self.model = QtGui.QStandardItemModel(self)
-        self.view.setModel(self.model)
-
-        self.view.projectActivated.connect(self.onProjectActivated)
 
     def populate(self):
-        tank_names = list_projects(self.projects_dir)
+        """Re-scan projects_dir and reload every project's init.py from scratch, replacing
+        the model wholesale. Loading each Project runs off the GUI thread via
+        self.promise() - it's fast (milliseconds per project) but this keeps the UI locked
+        with a busy cursor while it happens, consistent with the rest of the codebase.
+        """
         self.setBusy(True)
+        tank_names = list_projects(self.projects_dir)
         (
-            self.database.find(self, "Project", [["tank_name", "in", tank_names]], ["tank_name", "name"])
-            .then(lambda rows: self._onProjectsFetched(tank_names, rows))
+            self.promise(self._loadProjects, tank_names)
+            .then(self._onProjectsLoaded)
             .and_finally(lambda: self.setBusy(False))
         )
 
-    def _onProjectsFetched(self, tank_names: list[str], rows: list[dict]):
-        self.__display_names = {row["tank_name"]: row["name"] for row in rows}
+    def _loadProjects(self, tank_names: list[str]) -> dict[str, Project]:
+        projects = {}
+        for tank_name in tank_names:
+            try:
+                projects[tank_name] = Project.from_name(self.projects_dir, tank_name)
+            except Exception:
+                logger.exception("Failed to load project: %s", tank_name)
+        return projects
+
+    def _onProjectsLoaded(self, projects: dict[str, Project]):
+        self.projects = projects
 
         self.model.clear()
-        for tank_name in tank_names:
-            self.model.appendRow(ProjectItem(tank_name, self.getDisplayName(tank_name)))
-
+        for tank_name, project in self.projects.items():
+            self.model.appendRow(ProjectItem(tank_name, self.getDisplayName(tank_name), project.commands()))
         self.populated.emit()
+
+        # Rows are up immediately with tank_name as a fallback label - display names and
+        # images are ShotGrid data, fetched in the background and dropped in once they land.
+        self.database.find(
+            self, "Project", [["tank_name", "in", list(self.projects)]], ["tank_name", "name", "image"]
+        ).then(self._onNamesFetched)
+
+    def _onNamesFetched(self, rows: list[dict]):
+        self.__display_names = {row["tank_name"]: row["name"] for row in rows}
+        image_urls = {row["tank_name"]: row.get("image") for row in rows}
+
+        for row in range(self.model.rowCount()):
+            item = self.model.item(row)
+            tank_name = item.data(ItemDataRole.UserRole)
+
+            display_name = self.__display_names.get(tank_name)
+            if display_name:
+                item.setText(display_name)
+
+            image_url = image_urls.get(tank_name)
+            if image_url:
+                self.promise(_download_pixmap, image_url).then(
+                    lambda pixmap, item=item: self._onImageLoaded(item, pixmap)
+                )
+
+    def _onImageLoaded(self, item: QtGui.QStandardItem, pixmap: QtGui.QPixmap | None):
+        if pixmap:
+            item.setIcon(QtGui.QIcon(pixmap))
 
     def getDisplayName(self, tank_name: str) -> str:
         return self.__display_names.get(tank_name, tank_name)
 
-    def onProjectActivated(self, index: QtCore.QModelIndex):
-        if not index.isValid():
-            return
-        self.projectSelected.emit(index.data(ItemDataRole.UserRole))
+    def getProject(self, tank_name: str) -> Project | None:
+        return self.projects.get(tank_name)
 
 
 class LauncherView(QtWidgets.QWidget):
     backClicked = QtCore.Signal()
+    reloadRequested = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -154,7 +141,7 @@ class LauncherView(QtWidgets.QWidget):
         heading_font.setPointSize(heading_font.pointSize() + 3)
         heading_font.setWeight(QtGui.QFont.Weight.DemiBold)
         self.title_label.setFont(heading_font)
-        self.back_button = QtWidgets.QPushButton("Back")
+        self.back_button = QtWidgets.QPushButton(qta.icon("fa5s.arrow-left"), "Back")
         self.back_button.setObjectName("back_button")
         self.back_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
 
@@ -166,12 +153,16 @@ class LauncherView(QtWidgets.QWidget):
         top_bar.setObjectName("top_bar")
         top_bar.setLayout(top_bar_layout)
 
-        self.command_list_view = CommandListView()
-        self.project_list_view = ProjectListView()
+        self.command_list = QtWidgets.QListView()
+        self.command_list.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        self.project_list = QtWidgets.QListView()
+        self.project_list.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.project_list.setIconSize(QtCore.QSize(PROJECT_IMAGE_SIZE, PROJECT_IMAGE_SIZE))
 
         self.stack = QtWidgets.QStackedWidget()
-        self.stack.addWidget(self.command_list_view)
-        self.stack.addWidget(self.project_list_view)
+        self.stack.addWidget(self.command_list)
+        self.stack.addWidget(self.project_list)
 
         self.user_image_label = QtWidgets.QLabel()
         self.user_image_label.setObjectName("user_image_label")
@@ -186,12 +177,22 @@ class LauncherView(QtWidgets.QWidget):
         bottom_bar.setObjectName("bottom_bar")
         bottom_bar.setLayout(bottom_bar_layout)
 
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(top_bar)
-        layout.addWidget(self.stack, 1)
-        layout.addWidget(bottom_bar)
+        self.content = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(self.content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        content_layout.addWidget(top_bar)
+        content_layout.addWidget(self.stack, 1)
+        content_layout.addWidget(bottom_bar)
+
+        self.login_view = LoginView()
+        self.outer_stack = QtWidgets.QStackedWidget()
+        self.outer_stack.addWidget(self.content)
+        self.outer_stack.addWidget(self.login_view)
+
+        outer_layout = QtWidgets.QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.addWidget(self.outer_stack)
 
         self.back_button.clicked.connect(self.backClicked)
 
@@ -223,7 +224,7 @@ class LauncherView(QtWidgets.QWidget):
             }
 
             LauncherView QLabel#user_image_label {
-                margin: 6px 8px;
+                margin: 2px 2px;
                 border-radius: 4px;
                 background-color: palette(base);
             }
@@ -251,10 +252,19 @@ class LauncherView(QtWidgets.QWidget):
         )
 
     def showCommandList(self):
-        self.stack.setCurrentWidget(self.command_list_view)
+        self.stack.setCurrentWidget(self.command_list)
 
     def showProjectList(self):
-        self.stack.setCurrentWidget(self.project_list_view)
+        self.stack.setCurrentWidget(self.project_list)
+
+    def getLoginView(self) -> QtWidgets.QWidget:
+        return self.login_view
+
+    def showLogin(self):
+        self.outer_stack.setCurrentWidget(self.login_view)
+
+    def showContent(self):
+        self.outer_stack.setCurrentWidget(self.content)
 
     def setTitle(self, text: str):
         self.title_label.setText(text)
@@ -274,6 +284,14 @@ class LauncherView(QtWidgets.QWidget):
         )
         self.user_image_label.setPixmap(scaled)
 
+    def setBusy(self, busy: bool):
+        self.setDisabled(busy)
+
+        if busy and not self.isEnabled():
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.BusyCursor)
+        else:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
     def closeEvent(self, event: QtGui.QCloseEvent):
         # Closing the window (e.g. the WM's [X]) just hides it - the tray icon is what
         # actually keeps the app alive, per app.setQuitOnLastWindowClosed(False) in main().
@@ -282,7 +300,9 @@ class LauncherView(QtWidgets.QWidget):
 
     def contextMenuEvent(self, event: QtGui.QContextMenuEvent):
         menu = QtWidgets.QMenu(self)
-        menu.addAction("Quit", QtWidgets.QApplication.instance().quit)
+        menu.addAction(qta.icon("fa5s.sync"), "Reload", lambda: self.reloadRequested.emit())
+        menu.addSeparator()
+        menu.addAction(qta.icon("fa5s.sign-out-alt"), "Quit", QtWidgets.QApplication.instance().quit)
         menu.exec(event.globalPos())
 
 
@@ -291,13 +311,21 @@ def _download_pixmap(url: str) -> QtGui.QPixmap | None:
         with urllib.request.urlopen(url, timeout=10) as response:
             data = response.read()
     except urllib.error.URLError:
-        logger.exception("Failed to download user image from %s", url)
+        logger.exception("Failed to download image from %s", url)
         return None
 
     pixmap = QtGui.QPixmap()
     if not pixmap.loadFromData(data):
         return None
     return pixmap
+
+
+def launch(project: Project, command: CommandDefinition):
+    env = os.environ.copy()
+    env["JAVELIN_PROJECT_PATH"] = project.directory
+
+    logger.info("Launching %s: %s", command.label, command.command)
+    subprocess.Popen(command.command, env=env, start_new_session=True)
 
 
 class LauncherController(BaseController):
@@ -314,47 +342,76 @@ class LauncherController(BaseController):
         self.view = view or LauncherView()
         self.project: Project | None = None
 
-        self.command_list_controller = CommandListController(view=self.view.command_list_view)
-        self.project_list_controller = ProjectListController(
-            self.projects_dir, self.database, view=self.view.project_list_view
-        )
+        self.project_model_controller = ProjectModelController(self.projects_dir, self.database)
+        self.view.project_list.setModel(self.project_model_controller.model)
+        self.view.command_list.setModel(self.project_model_controller.model)
+
+        self.login_controller = LoginController(self.database.site_url, view=self.view.getLoginView())
 
         self.view.backClicked.connect(self.onBackClicked)
-        self.command_list_controller.commandActivated.connect(self.onCommandActivated)
-        self.project_list_controller.projectSelected.connect(self.onProjectSelected)
+        self.view.reloadRequested.connect(self.reload)
+        self.view.project_list.activated.connect(self.onProjectActivated)
+        self.view.command_list.activated.connect(self.onCommandActivated)
+
+        self.project_model_controller.busyChanged.connect(self.setBusy)
+        self.busyChanged.connect(self.view.setBusy)
+
+        self.database.authenticationRequired.connect(self.onAuthenticationRequired)
+        self.login_controller.ready.connect(self.onCredentialsReady)
+
+    def start(self):
+        """Entry point - shows the login screen and begins sign-in. populate() runs once
+        credentials are ready, whether that's now or after any later reauth."""
+        self.onAuthenticationRequired()
+
+    def onAuthenticationRequired(self):
+        self.view.showLogin()
+        self.login_controller.start()
+
+    def onCredentialsReady(self, credentials):
+        self.database.set_credentials(credentials)
+        self.view.showContent()
+        self.populate()
 
     def populate(self):
-        self.project_list_controller.populate()
+        self.project_model_controller.populate()
+        self.loadUserImage()
+        self._showProjectList()
+
+    def reload(self):
+        """Re-scan projects_dir and re-fetch ShotGrid names/commands from scratch, and
+        reset to the Projects page with nothing selected - simpler than trying to carry a
+        selection across a wholesale model rebuild, and this already re-emits `populated`,
+        which TrayController listens on to rebuild the tray's Projects menu too.
+        """
+        logger.info("Reloading projects and commands...")
+        self.project_model_controller.populate()
+        self._showProjectList()
+
+    def onBackClicked(self):
+        self._showProjectList()
+
+    def _showProjectList(self):
+        self.project = None
         self.view.setTitle("Projects")
         self.view.setBackEnabled(False)
         self.view.showProjectList()
-        self.loadUserImage()
 
-    def onBackClicked(self):
-        if self.view.stack.currentWidget() is self.view.project_list_view:
-            if self.project is not None:
-                self.view.setTitle(self.project_list_controller.getDisplayName(str(self.project)))
-                self.view.showCommandList()
-        else:
-            self.view.setTitle("Projects")
-            self.view.showProjectList()
+    def onProjectActivated(self, index: QtCore.QModelIndex):
+        if not index.isValid():
+            return
 
-    def onProjectSelected(self, tank_name: str):
-        self.project = Project.from_name(self.projects_dir, tank_name)
-        self.command_list_controller.setProject(self.project)
-        self.view.setTitle(self.project_list_controller.getDisplayName(tank_name))
+        tank_name = index.data(ItemDataRole.UserRole)
+        self.project = self.project_model_controller.getProject(tank_name)
+        self.view.command_list.setRootIndex(index)
+        self.view.setTitle(self.project_model_controller.getDisplayName(tank_name))
         self.view.setBackEnabled(True)
         self.view.showCommandList()
 
-    def onCommandActivated(self, command: CommandDefinition):
-        if self.project is None:
+    def onCommandActivated(self, index: QtCore.QModelIndex):
+        if not index.isValid() or self.project is None:
             return
-
-        env = os.environ.copy()
-        env["JAVELIN_PROJECT_PATH"] = self.project.directory
-
-        logger.info("Launching %s: %s", command.label, command.command)
-        subprocess.Popen(command.command, env=env, start_new_session=True)
+        launch(self.project, index.data(ItemDataRole.UserRole))
 
     def loadUserImage(self):
         user = self.database.user()
@@ -372,17 +429,14 @@ class LauncherController(BaseController):
         return self.view
 
 
-_ICONS_DIR = pathlib.Path(icon_assets.__file__).resolve().parent
-_ICON_PATH = _ICONS_DIR / "icon.png"
-
-
 def _command_icon(command: CommandDefinition) -> QtGui.QIcon:
-    icon_path = _ICONS_DIR / f"{command.extension}.png"
-    return QtGui.QIcon(str(icon_path)) if icon_path.is_file() else QtGui.QIcon()
+    if not command.icon:
+        return QtGui.QIcon()
+    return QtGui.QIcon(command.icon)
 
 
 def _tray_icon() -> QtGui.QIcon:
-    icon = QtGui.QIcon(str(_ICON_PATH))
+    icon = QtGui.QIcon(f"{icon_resources.PREFIX}/icon.png")
     if icon.isNull():
         icon = QtGui.QIcon.fromTheme("applications-graphics")
     if icon.isNull():
@@ -397,21 +451,22 @@ class TrayController(BaseController):
     def __init__(self, launcher_controller: LauncherController, parent=None):
         super().__init__(parent=parent)
         self.launcher_controller = launcher_controller
-        self._project_cache: dict[str, Project] = {}
 
         self.menu = QtWidgets.QMenu()
-        self.menu.addAction("Show UI", self.showView)
+        self.menu.addAction(qta.icon("fa5s.external-link-alt"), "Show UI", self.showView)
         self.menu.addSeparator()
 
-        self.projects_menu = self.menu.addMenu("Projects")
+        self.projects_menu = self.menu.addMenu(qta.icon("fa5s.folder"), "Projects")
         self.buildProjectsMenu()
-        # ShotGrid display names usually aren't back yet when we build the menu above
-        # (that fetch is async) - rebuild once, when they land, rather than resolving
-        # anything lazily on open.
-        launcher_controller.project_list_controller.populated.connect(self.buildProjectsMenu)
+        # The shared model is usually still empty when we build the menu above (project
+        # loading is async) - rebuild once it lands, rather than resolving anything lazily
+        # on open.
+        launcher_controller.project_model_controller.populated.connect(self.buildProjectsMenu)
 
         self.menu.addSeparator()
-        self.menu.addAction("Quit", QtWidgets.QApplication.instance().quit)
+        self.menu.addAction(qta.icon("fa5s.sync"), "Reload", launcher_controller.reload)
+        self.menu.addSeparator()
+        self.menu.addAction(qta.icon("fa5s.sign-out-alt"), "Quit", QtWidgets.QApplication.instance().quit)
 
         self.tray_icon = QtWidgets.QSystemTrayIcon(_tray_icon(), parent)
         self.tray_icon.setToolTip("Javelin")
@@ -422,40 +477,30 @@ class TrayController(BaseController):
         self.tray_icon.show()
 
     def buildProjectsMenu(self):
-        """Eagerly load every project and its commands, and build the whole submenu tree
-        up front - nothing is resolved lazily on open, so there's no rebuild/flicker while
-        the menu is already showing."""
+        """Mirrors the shared project/command model onto the tray's Projects submenu -
+        nothing is loaded here, it just walks rows the model has already built."""
         self.projects_menu.clear()
-        self._project_cache.clear()
+        model = self.launcher_controller.project_model_controller.model
 
-        projects_dir = self.launcher_controller.projects_dir
-        display_names = self.launcher_controller.project_list_controller
+        for row in range(model.rowCount()):
+            project_item = model.item(row)
+            tank_name = project_item.data(ItemDataRole.UserRole)
 
-        for tank_name in list_projects(projects_dir):
-            try:
-                project = Project.from_name(projects_dir, tank_name)
-            except Exception:
-                logger.exception("Failed to load project for tray menu: %s", tank_name)
-                continue
-
-            self._project_cache[tank_name] = project
-
-            submenu = self.projects_menu.addMenu(display_names.getDisplayName(tank_name))
-            for command in project.commands():
+            submenu = self.projects_menu.addMenu(project_item.text())
+            for command_row in range(project_item.rowCount()):
+                command_item = project_item.child(command_row)
+                command = command_item.data(ItemDataRole.UserRole)
                 submenu.addAction(
-                    _command_icon(command),
+                    command_item.icon(),
                     command.label,
                     lambda tank_name=tank_name, command=command: self.launchCommand(tank_name, command),
                 )
 
     def launchCommand(self, tank_name: str, command: CommandDefinition):
-        project = self._project_cache[tank_name]
-
-        env = os.environ.copy()
-        env["JAVELIN_PROJECT_PATH"] = project.directory
-
-        logger.info("Launching %s: %s", command.label, command.command)
-        subprocess.Popen(command.command, env=env, start_new_session=True)
+        project = self.launcher_controller.project_model_controller.getProject(tank_name)
+        if project is None:
+            return
+        launch(project, command)
 
     def showView(self):
         view = self.launcher_controller.get_view()
@@ -555,7 +600,7 @@ def _install_signal_handlers(app: QtWidgets.QApplication) -> QtCore.QTimer:
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     logger.info("Launching Javelin launcher...")
 
     app = QtWidgets.QApplication([])
@@ -570,7 +615,7 @@ def main():
         return
 
     controller = LauncherController()
-    controller.populate()
+    controller.start()
 
     tray = TrayController(controller)
     tray.show()

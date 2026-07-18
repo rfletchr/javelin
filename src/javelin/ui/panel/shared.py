@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import enum
-import logging
 import os
-import pathlib
 import typing
 
 import fast_blurhash
 from qtpy import QtCore, QtGui, QtWidgets
 
-from javelin.ui import icons as icon_assets
-from javelin.ui.database import Database
+from javelin.ui import icon_resources
 from javelin.ui.promise import Promise
 
 ItemDataRole = QtCore.Qt.ItemDataRole
@@ -19,8 +16,6 @@ IndexType = QtCore.QModelIndex | QtCore.QPersistentModelIndex
 __all__ = ["BurninStamp", "ModelRoles", "StampWidget", "WidgetDelegate", "get_theme_icon"]
 
 _STAMP_IMAGE_SIZE = QtCore.QSize(186, 140)
-
-logger = logging.getLogger(__name__)
 
 
 class ModelRoles(enum.IntEnum):
@@ -410,38 +405,12 @@ class ImageProviderModel(QtCore.QIdentityProxyModel):
         self.dataChanged.emit(self.index(row, 0), self.index(row, 0))
 
 
-class SharedData(typing.NamedTuple):
-    status_code_to_name: dict[str, str]
-    status_code_to_color: dict[str, QtGui.QColor]
-
-    @classmethod
-    def from_db(cls, db: Database):
-        logger.info("Loading shared data from database.")
-        connection = db.get_connection()
-
-        statuses = typing.cast(list[dict], connection.find("Status", [], ["code", "name", "bg_color"]))
-
-        status_code_to_name = {status["code"]: status["name"] for status in statuses}
-        status_code_to_color = {}
-        for status in statuses:
-            bg_color_str = status["bg_color"]
-            if not bg_color_str:
-                continue
-
-            members = [int(s) for s in bg_color_str.split(",")]
-            status_code_to_color[status["code"]] = QtGui.QColor(*members)
-
-        return cls(status_code_to_name, status_code_to_color)
-
-
 class IconProviderModel(QtCore.QIdentityProxyModel):
     """Supplies DecorationRole icons from Qt's file icon provider, keyed off each row's PathRole.
 
-    Extensions with a bundled PNG in rock.qt.icons/ (e.g. nk.png, exr.png) use that instead of the
-    generic system icon.
+    Extensions with a bundled icon resource (e.g. nk.png, exr.png - see icons/icons.qrc) use
+    that instead of the generic system icon.
     """
-
-    __ICONS_DIR = pathlib.Path(icon_assets.__file__).resolve().parent
 
     def __init__(self, parent: QtCore.QObject | None = None):
         super().__init__(parent)
@@ -475,9 +444,9 @@ class IconProviderModel(QtCore.QIdentityProxyModel):
         return source_model.data(source_index, role)
 
     def __loadIcon(self, extension: str, path: str) -> QtGui.QIcon:
-        custom_icon_path = self.__ICONS_DIR / f"{extension}.png"
-        if custom_icon_path.is_file():
-            return QtGui.QIcon(str(custom_icon_path))
+        custom_icon = QtGui.QIcon(f"{icon_resources.PREFIX}/{extension}.png")
+        if not custom_icon.isNull():
+            return custom_icon
         return self.__provider.icon(QtCore.QFileInfo(path))
 
     def mimeTypes(self) -> list[str]:

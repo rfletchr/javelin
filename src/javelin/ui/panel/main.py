@@ -6,9 +6,9 @@ from javelin.project import AssetContext, ContextClasses, EpisodicShotContext, P
 from javelin.publish import task_filters_for_context
 from javelin.ui.controller import BaseController, PanelController
 from javelin.ui.database import Database, get_database
+from javelin.ui.login import LoginController, LoginView
 from javelin.ui.panel.file_open import FileOpenController
 from javelin.ui.panel.loader import LoaderController
-from javelin.ui.panel.shared import SharedData
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +41,19 @@ class MainView(QtWidgets.QWidget):
 
         self.tab_view = QtWidgets.QTabWidget()
 
-        main_layout = QtWidgets.QVBoxLayout()
-        main_layout.addLayout(header_layout)
-        main_layout.addWidget(self.tab_view)
-        self.setLayout(main_layout)
+        self.content = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(self.content)
+        content_layout.addLayout(header_layout)
+        content_layout.addWidget(self.tab_view)
+
+        self.login_view = LoginView()
+        self.outer_stack = QtWidgets.QStackedWidget()
+        self.outer_stack.addWidget(self.content)
+        self.outer_stack.addWidget(self.login_view)
+
+        outer_layout = QtWidgets.QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.addWidget(self.outer_stack)
 
         self.setStyleSheet(
             """
@@ -75,6 +84,15 @@ class MainView(QtWidgets.QWidget):
         else:
             QtWidgets.QApplication.restoreOverrideCursor()
 
+    def getLoginView(self) -> QtWidgets.QWidget:
+        return self.login_view
+
+    def showLogin(self):
+        self.outer_stack.setCurrentWidget(self.login_view)
+
+    def showContent(self):
+        self.outer_stack.setCurrentWidget(self.content)
+
 
 class MainController(BaseController):
     workfileActivated = QtCore.Signal(object)  # Workfile  # type: ignore
@@ -84,20 +102,18 @@ class MainController(BaseController):
     def __init__(
         self,
         project: Project,
-        database: Database,
-        shared_data: SharedData,
+        database: Database | None = None,
         view: MainView | None = None,
         parent=None,
     ):
         super().__init__(parent=parent)
         self.project = project
-        self.database = database
+        self.database = database or get_database()
         self.view = view or MainView()
-        self.shared_data = shared_data
         self._panel_controllers: list[PanelController] = []
 
-        self.file_open_controller = FileOpenController(project, database, shared_data)
-        self.loader_controller = LoaderController(project, database, shared_data)
+        self.file_open_controller = FileOpenController(project, self.database)
+        self.loader_controller = LoaderController(project, self.database)
 
         self.addTabController(self.file_open_controller)
         self.addTabController(self.loader_controller)
@@ -110,6 +126,24 @@ class MainController(BaseController):
         self.file_open_controller.workfileActivated.connect(self.workfileActivated)
         self.file_open_controller.workfileCreated.connect(self.workfileCreated)
         self.loader_controller.publishActivated.connect(self.publishActivated)
+
+        self.login_controller = LoginController(self.database.site_url, view=self.view.getLoginView())
+        self.database.authenticationRequired.connect(self.onAuthenticationRequired)
+        self.login_controller.ready.connect(self.onCredentialsReady)
+
+    def start(self):
+        """Entry point - shows the login screen and begins sign-in. populate() runs once
+        credentials are ready, whether that's now or after any later reauth."""
+        self.onAuthenticationRequired()
+
+    def onAuthenticationRequired(self):
+        self.view.showLogin()
+        self.login_controller.start()
+
+    def onCredentialsReady(self, credentials):
+        self.database.set_credentials(credentials)
+        self.view.showContent()
+        self.populate()
 
     def addTab(self, name: str, widget: QtWidgets.QWidget):
         if self.view.hasTab(name):
@@ -190,11 +224,8 @@ class MainController(BaseController):
         return self.view
 
 
-def get_main_controller(project: Project):
-    db = get_database()
-    shared_data = SharedData.from_db(db)
-
-    return MainController(project, db, shared_data)
+def get_main_controller(project: Project) -> MainController:
+    return MainController(project, get_database())
 
 
 def main():
@@ -204,7 +235,7 @@ def main():
     app = QtWidgets.QApplication([])
     project = Project.from_environment()
     controller = get_main_controller(project)
-    controller.populate()
+    controller.start()
     controller.view.show()
     app.exec()
 

@@ -9,7 +9,7 @@ from javelin.nuke.controller import NukeController
 
 JAVELIN_PROJECT = Project.from_environment()
 JAVELIN_MAIN_CONTROLLER = get_main_controller(JAVELIN_PROJECT)
-JAVELIN_MAIN_CONTROLLER.populate()
+JAVELIN_MAIN_CONTROLLER.start()
 JAVELIN_NUKE_CONTROLLER = NukeController()
 
 JAVELIN_MAIN_CONTROLLER.workfileActivated.connect(JAVELIN_NUKE_CONTROLLER.openWorkfile)
