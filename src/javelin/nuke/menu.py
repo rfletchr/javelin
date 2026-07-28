@@ -3,14 +3,18 @@ import shiboken6
 from nukescripts import panels
 from qtpy import QtCore
 
+from javelin.nuke.controller import NukeController
+from javelin.nuke.ui.render_submit import NukeRenderSubmitController
 from javelin.project import Project
 from javelin.ui.panel.main import get_main_controller
-from javelin.nuke.controller import NukeController
 
 JAVELIN_PROJECT = Project.from_environment()
 JAVELIN_MAIN_CONTROLLER = get_main_controller(JAVELIN_PROJECT)
-JAVELIN_MAIN_CONTROLLER.start()
 JAVELIN_NUKE_CONTROLLER = NukeController()
+JAVELIN_RENDER_SUBMIT_CONTROLLER = NukeRenderSubmitController()
+
+JAVELIN_MAIN_CONTROLLER.addTabController(JAVELIN_RENDER_SUBMIT_CONTROLLER)
+JAVELIN_MAIN_CONTROLLER.start()
 
 JAVELIN_MAIN_CONTROLLER.workfileActivated.connect(JAVELIN_NUKE_CONTROLLER.openWorkfile)
 JAVELIN_MAIN_CONTROLLER.workfileCreated.connect(JAVELIN_NUKE_CONTROLLER.openWorkfile)

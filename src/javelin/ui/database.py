@@ -10,7 +10,7 @@ from qtpy import QtCore
 from shotgun_api3.shotgun import Shotgun  # type: ignore[reportPrivateImportUsage]
 
 from javelin import auth
-from javelin.shotgun_connection import ConnectionFactory, NotAuthenticated
+from javelin.connection import ConnectionFactory, NotAuthenticated
 from javelin.ui.promise import Promise
 from javelin.ui.utils import invokeInContext
 
@@ -51,7 +51,7 @@ class Database(QtCore.QObject):
 
     def get_connection(self) -> Shotgun:
         try:
-            return self.__factory.get_client()
+            return self.__factory.get_connection()
         except NotAuthenticated:
             self.authenticationRequired.emit()
             raise
@@ -60,7 +60,7 @@ class Database(QtCore.QObject):
 
     def __invoke(self, method: str, args: tuple, kwargs: dict):
         try:
-            client = self.__factory.get_client()
+            client = self.__factory.get_connection()
             return getattr(client, method)(*args, **kwargs)
         except (shotgun_api3.AuthenticationFault, NotAuthenticated):  # type: ignore[attr-defined]
             self.authenticationRequired.emit()

@@ -157,8 +157,8 @@ class MainController(BaseController):
 
     def populate(self):
         logger.info("Populating panel for project: %s", self.project)
-        self.file_open_controller.populate()
-        self.loader_controller.populate()
+        for controller in self._panel_controllers:
+            controller.populate()
         self.loadProjectName()
 
     def loadProjectName(self):

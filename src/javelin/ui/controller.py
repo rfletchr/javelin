@@ -40,6 +40,9 @@ class PanelController(BaseController):
     def getName(self) -> str:
         raise NotImplementedError
 
+    def populate(self):
+        raise NotImplementedError
+
     def setup(self):
         pass
 

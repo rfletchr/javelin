@@ -9,14 +9,14 @@ import time
 import typing
 from concurrent.futures import ThreadPoolExecutor
 
-import shotgun_api3
 
 from javelin.project import AssetContext, ContextClasses, EpisodicShotContext, ShotContext
+from javelin.connection import ConnectionFactory
 from javelin.utils import log_timing
+
 
 logger = logging.getLogger("javelin.publish")
 
-ConnectionFactory = typing.Callable[[], shotgun_api3.Shotgun]
 
 _LOCAL_STORAGE_PATH_FIELD = {
     "Windows": "windows_path",
