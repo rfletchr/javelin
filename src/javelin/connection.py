@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ["ConnectionFactory", "NotAuthenticated"]
+__all__ = ["ConnectionFactory"]
 
 import threading
 import typing
@@ -8,10 +8,7 @@ import typing
 from shotgun_api3.shotgun import Shotgun  # type: ignore[reportPrivateImportUsage]
 
 from javelin import auth
-
-
-class NotAuthenticated(Exception):
-    """Raised when a client is requested before set_credentials() has ever been called."""
+from javelin.errors import NotAuthenticated
 
 
 class _PooledConnection(typing.NamedTuple):

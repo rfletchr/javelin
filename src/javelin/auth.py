@@ -14,24 +14,14 @@ import webbrowser
 
 import shotgun_api3
 
+from javelin.errors import AuthenticationError, AuthenticationTimeout
+
 DEFAULT_SITE_URL = "https://elephant-goldfish.shotgrid.autodesk.com"
 
 _CONFIG_DIR = pathlib.Path.home() / ".config" / "javelin"
 _CONFIG_FILE = _CONFIG_DIR / "connection.json"
 
 logger = logging.getLogger(__name__)
-
-
-class NotgunAuthError(Exception):
-    pass
-
-
-class AuthenticationError(NotgunAuthError):
-    pass
-
-
-class AuthenticationTimeout(NotgunAuthError):
-    pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -237,7 +227,8 @@ def _load_credentials(site_url: str) -> Credentials | None:
     try:
         logger.info("Loading cached credentials for site_url %s", site_url)
         return Credentials(**encoded)
-    except Exception:
+    except Exception as e:
+        logger.exception("unhandled exception during auth", exc_info=e)
         return None
 
 

@@ -10,7 +10,8 @@ from qtpy import QtCore
 from shotgun_api3.shotgun import Shotgun  # type: ignore[reportPrivateImportUsage]
 
 from javelin import auth
-from javelin.connection import ConnectionFactory, NotAuthenticated
+from javelin.connection import ConnectionFactory
+from javelin.errors import NotAuthenticated
 from javelin.ui.promise import Promise
 from javelin.ui.utils import invokeInContext
 

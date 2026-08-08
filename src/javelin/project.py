@@ -45,25 +45,47 @@ class Project:
         directory = os.environ[PROJECT_PATH_ENV_VAR]
         return cls.from_directory(directory)
 
-    def __init__(
-        self,
-        directory: str,
-        templates: dict[str, templateslib.PathTemplate],
-        context_definitions: tuple[ContextDefinition, ...],
-        commands: tuple[CommandDefinition, ...],
-    ):
+    def __init__(self, directory: str):
         self.__directory = directory
         self.__name = os.path.basename(os.path.normpath(directory))
-        self.__templates = templates
-        self.__context_definitions = context_definitions
-        self.__commands = commands
+        self.__templates: dict[str, templateslib.PathTemplate] = {}
+        self.__context_definitions: list[ContextDefinition] = []
+        self.__commands: list[CommandDefinition] = []
 
     @property
     def directory(self) -> str:
         return self.__directory
 
+    def define_templates(self, templates: dict[str, str]) -> dict[str, templateslib.PathTemplate]:
+        root = os.path.dirname(self.__directory)
+        compiled = templateslib.compile_templates(root, templates)
+        self.__templates.update(compiled)
+        return compiled
+
+    def define_context(
+        self,
+        cls: type[ContextClasses],
+        template: templateslib.PathTemplate,
+        workfiles: tuple[WorkfileDefinition, ...] = (),
+        publishes: tuple[PublishDefinition, ...] = (),
+    ) -> ContextDefinition:
+        definition = ContextDefinition(
+            cls=cls,
+            template=template,
+            workfiles=workfiles,
+            publishes=publishes,
+            project_instance=self,
+        )
+        self.__context_definitions.append(definition)
+        return definition
+
+    def define_command(self, label: str, command: list[str], icon: str | None = None) -> CommandDefinition:
+        definition = CommandDefinition(label=label, command=command, icon=icon)
+        self.__commands.append(definition)
+        return definition
+
     def commands(self):
-        return self.__commands
+        return tuple(self.__commands)
 
     def templates(self):
         return self.__templates.copy()
@@ -193,3 +215,4 @@ class ContextDefinition(typing.NamedTuple):
     template: templateslib.PathTemplate
     workfiles: tuple[WorkfileDefinition, ...]
     publishes: tuple[PublishDefinition, ...]
+    project_instance: Project
